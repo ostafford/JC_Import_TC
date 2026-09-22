@@ -73,6 +73,19 @@ export class RelayStore {
     }
   }
 
+  /**
+   * Public entry point for the setup wizard's bootstrap call (which never
+   * goes through the magic-link flow) to seed the Admin who can later log in.
+   * Same semantics as the private `claimAdminEmailIfUnset` used internally by
+   * `redeemMagicLink` — first email wins, already-claimed accounts are a
+   * no-op — but persists immediately since there's no other write in the
+   * same request to piggyback the save on.
+   */
+  claimAdminEmail(email: string): void {
+    this.claimAdminEmailIfUnset(email);
+    this.save();
+  }
+
   getChatLink(): ChatLink | undefined {
     return this.state.chatLink;
   }

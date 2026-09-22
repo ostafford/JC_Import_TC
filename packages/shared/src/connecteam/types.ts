@@ -43,6 +43,25 @@ export interface ChatConversation {
   name?: string;
 }
 
+/**
+ * Confirmed via a direct `GET /settings/v1/webhooks` call (issue 06 addendum,
+ * 2026-09-23) — used only to let the setup wizard verify a webhook the Admin
+ * created by hand in Connecteam's own UI actually exists with the right
+ * scope, since `secretKey` is never echoed back by this endpoint (so the
+ * secret itself can't be verified this way, only the object's existence and
+ * targeting).
+ */
+export interface ConnecteamWebhook {
+  id: string;
+  name: string;
+  url: string;
+  isDisabled: boolean;
+  featureType: string;
+  entityId: string | null;
+  eventTypes: string[];
+  webhookVersion: number;
+}
+
 export interface FileAttachment {
   type: "file";
   fileId: FileId;

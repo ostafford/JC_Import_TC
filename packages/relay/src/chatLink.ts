@@ -53,14 +53,46 @@ ${notice}
 
 export async function handleSaveChatLink(req: IncomingMessage, res: ServerResponse, store: RelayStore): Promise<void> {
   const form = await parseFormBody(req);
-  const conversationId = form.conversationId?.trim();
-  const importerEndpointUrl = form.importerEndpointUrl?.trim();
-  const sharedSecretInput = form.sharedSecret?.trim();
-  const connecteamWebhookSecretInput = form.connecteamWebhookSecret?.trim();
+  const result = saveChatLinkFromValues(store, {
+    conversationId: form.conversationId?.trim(),
+    importerEndpointUrl: form.importerEndpointUrl?.trim(),
+    sharedSecret: form.sharedSecret?.trim(),
+    connecteamWebhookSecret: form.connecteamWebhookSecret?.trim(),
+  });
+
+  if (!result.ok) {
+    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(page("Invalid Chat Link", `<h1>That Chat Link is missing or invalid</h1><p><a href="/">Go back</a>.</p>`));
+    return;
+  }
+
+  res.writeHead(302, { Location: "/?saved=1" });
+  res.end();
+}
+
+/**
+ * Validates and saves a Chat Link from raw (possibly blank/missing) values —
+ * shared by the session-gated `/chat-link` form above and the setup wizard's
+ * loopback-only bootstrap route (`wizardBootstrap.ts`), so both go through
+ * the exact same rules instead of two copies drifting apart. Blank
+ * secret fields keep whatever's already saved, matching the form's
+ * "leave blank to keep the current secret" behavior.
+ */
+export function saveChatLinkFromValues(
+  store: RelayStore,
+  values: {
+    conversationId?: string;
+    importerEndpointUrl?: string;
+    sharedSecret?: string;
+    connecteamWebhookSecret?: string;
+  },
+): { ok: true } | { ok: false; reason: string } {
+  const conversationId = values.conversationId;
+  const importerEndpointUrl = values.importerEndpointUrl;
 
   const existing = store.getChatLink();
-  const sharedSecret = sharedSecretInput || existing?.sharedSecret;
-  const connecteamWebhookSecret = connecteamWebhookSecretInput || existing?.connecteamWebhookSecret;
+  const sharedSecret = values.sharedSecret || existing?.sharedSecret;
+  const connecteamWebhookSecret = values.connecteamWebhookSecret || existing?.connecteamWebhookSecret;
 
   if (
     !conversationId ||
@@ -69,15 +101,11 @@ export async function handleSaveChatLink(req: IncomingMessage, res: ServerRespon
     !connecteamWebhookSecret ||
     !isValidHttpUrl(importerEndpointUrl)
   ) {
-    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(page("Invalid Chat Link", `<h1>That Chat Link is missing or invalid</h1><p><a href="/">Go back</a>.</p>`));
-    return;
+    return { ok: false, reason: "Chat Link is missing required fields or has an invalid endpoint URL" };
   }
 
   store.setChatLink(chatLinkFromForm({ conversationId, importerEndpointUrl, sharedSecret, connecteamWebhookSecret }));
-
-  res.writeHead(302, { Location: "/?saved=1" });
-  res.end();
+  return { ok: true };
 }
 
 function isValidHttpUrl(value: string): boolean {

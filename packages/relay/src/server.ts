@@ -6,6 +6,7 @@ import { page } from "./html.js";
 import { createMailer } from "./mailer.js";
 import { RelayStore } from "./store.js";
 import { handleConnecteamWebhook } from "./webhookReceiver.js";
+import { handleWizardBootstrap } from "./wizardBootstrap.js";
 
 export function startServer(config: RelayConfig): void {
   const store = new RelayStore(config.dataPath);
@@ -36,6 +37,14 @@ async function route(
   // Public: Connecteam's own webhook call. Never behind a session.
   if (method === "POST" && url.pathname === "/webhooks/connecteam") {
     await handleConnecteamWebhook(req, res, store);
+    return;
+  }
+
+  // Public but narrow: the local setup wizard's one-time bootstrap, guarded
+  // by its own shared-secret + loopback check (see wizardBootstrap.ts) since
+  // there's no completed magic-link session on first run.
+  if (method === "POST" && url.pathname === "/internal/wizard-bootstrap") {
+    await handleWizardBootstrap(req, res, config, store);
     return;
   }
 

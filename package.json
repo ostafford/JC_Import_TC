@@ -11,6 +11,8 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "importer": "npm run start --workspace packages/importer"
+    "importer": "npm run start --workspace packages/importer",
+    "relay": "npm run start --workspace packages/relay",
+    "wizard": "npm run start --workspace packages/wizard"
   }
 }

@@ -12,6 +12,7 @@ import {
 import type {
   ChatConversation,
   ConnecteamUser,
+  ConnecteamWebhook,
   CreateBreakTimeActivityInput,
   CreateBreakTimeActivityResult,
   CreateShiftTimeActivityInput,
@@ -352,6 +353,33 @@ export class ConnecteamClient {
       },
     });
     return { webhookId: String(raw.id) };
+  }
+
+  /**
+   * Confirmed live (2026-09-23): `GET /settings/v1/webhooks` returns every
+   * webhook on the account (no `limit`/`offset` needed for the 3 this
+   * project's own testing produced — unlike `listConversations`, this has
+   * NOT been confirmed to paginate under a large account; revisit if an
+   * account with many webhooks ever needs this). Used by the setup wizard to
+   * verify an Admin manually created the right webhook in Connecteam's own
+   * UI (issue 06 addendum) rather than the Importer creating it via API —
+   * `secretKey` is never present on this response, so only existence and
+   * targeting (`url`, `entityId`, `eventTypes`) can be verified this way.
+   */
+  async listWebhooks(): Promise<ConnecteamWebhook[]> {
+    const raw = await this.request<{
+      webhooks: Array<{
+        id: number;
+        name: string;
+        url: string;
+        isDisabled: boolean;
+        featureType: string;
+        entityId: string | null;
+        eventTypes: string[];
+        webhookVersion: number;
+      }>;
+    }>("GET", "/settings/v1/webhooks");
+    return raw.webhooks.map((w) => ({ ...w, id: String(w.id) }));
   }
 
   /**

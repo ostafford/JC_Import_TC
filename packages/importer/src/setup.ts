@@ -1,7 +1,7 @@
-import { randomBytes } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { ConnecteamClient, asTimeClockId, type ManualBreakType } from "@sch-import/shared";
 import { persistSetupConfig } from "./config.js";
+import { buildPersistedConfig, generateWebhookSecrets } from "./setupSteps.js";
 
 /**
  * The one-time `importer setup` step (issue 06 + issue 08). Runs with the
@@ -30,7 +30,7 @@ export async function runSetup(): Promise<void> {
     if (!chosen) throw new Error("Invalid selection");
 
     const relayWebhookUrl = await rl.question("Relay's public webhook-receiver URL: ");
-    const connecteamWebhookSecret = randomBytes(32).toString("hex");
+    const { connecteamWebhookSecret, webhookSharedSecret } = generateWebhookSecrets();
     console.log("Creating a webhook scoped to this conversation...");
     await client.createConversationWebhook(chosen.conversationId, relayWebhookUrl, connecteamWebhookSecret);
 
@@ -56,16 +56,16 @@ export async function runSetup(): Promise<void> {
       paidBreakTypeId = await pickBreakType(rl, "paid", breaksConfig.breakTypes.filter((b) => b.isPaid));
     }
 
-    const webhookSharedSecret = randomBytes(32).toString("hex");
-
-    persistSetupConfig({
-      conversationId: chosen.conversationId,
-      timeClockId,
-      senderId,
-      manualBreaksEnabled: breaksConfig.areManualBreaksEnabled,
-      unpaidBreakTypeId,
-      paidBreakTypeId,
-    });
+    persistSetupConfig(
+      buildPersistedConfig({
+        conversationId: chosen.conversationId,
+        timeClockId,
+        senderId,
+        manualBreaksEnabled: breaksConfig.areManualBreaksEnabled,
+        unpaidBreakTypeId,
+        paidBreakTypeId,
+      }),
+    );
 
     console.log("\nSetup complete — importer.config.json written.\n");
     console.log("Add this to the Importer's own .env (never commit it):");
