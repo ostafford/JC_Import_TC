@@ -1,0 +1,23 @@
+{
+  "name": "@sch-import/importer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "importer": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node dist/cli.js",
+    "test": "node --test dist"
+  },
+  "dependencies": {
+    "@sch-import/shared": "0.1.0",
+    "exceljs": "^4.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

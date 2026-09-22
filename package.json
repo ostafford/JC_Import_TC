@@ -1,0 +1,16 @@
+{
+  "name": "connecteam-schedule-import",
+  "private": true,
+  "description": "Connecteam Schedule -> Timesheet Import: Relay + Importer, self-hosted per company. See CONTEXT.md and docs/.",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "importer": "npm run start --workspace packages/importer"
+  }
+}
