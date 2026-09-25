@@ -7,7 +7,7 @@ The system is split into two self-hosted pieces so that no shared infrastructure
 - **Relay** — stores one Chat Link (a conversation ID + an Importer's endpoint URL) per Admin, and forwards a bare trigger event when it sees a Schedule Export uploaded. Never sees a Connecteam API token or the export's contents.
 - **Importer** — the Admin's own process, holding the Admin's own Connecteam API token. Does the actual work: downloads the Schedule Export, parses it, matches rows to Employees, and writes Time Activities.
 
-Both are cloned and run from this same repo, self-hosted by whoever deploys them — not a shared service. See [`CONTEXT.md`](CONTEXT.md) for the full vocabulary (Admin, Employee, Chat Link, Import, etc.) used throughout the code and docs.
+Both are cloned and run from this same repo, self-hosted by whoever deploys them — not a shared service. See [`CONTEXT.md`](CONTEXT.md) for the full vocabulary (Admin, Employee, Chat Link, Import Run, etc.) used throughout the code and docs.
 
 ## Requirements
 
@@ -68,7 +68,7 @@ npm run wizard   # listens on :8789 by default
 Open `http://localhost:8789` and work through its six steps:
 
 1. **Connecteam API token** — from Connecteam: Settings → Integrations → API.
-2. **Pick a conversation** to link, and enter the Relay's public webhook URL (the Relay's tunnel URL from step 4, with `/webhooks/connecteam` appended). Use a chat containing only the Admins who should be able to trigger an Import.
+2. **Pick a conversation** to link, and enter the Relay's public webhook URL (the Relay's tunnel URL from step 4, with `/webhooks/connecteam` appended). Use a chat containing only the Admins who should be able to trigger an Import Run.
 3. **Create the webhook yourself in Connecteam** — the wizard shows you the exact values to enter (name, endpoint URL, secret key, feature, event type), then verifies it exists once you confirm.
 4. **Time Clock ID and Custom Publisher ID** — the Time Clock Time Activities are written to, and the Custom Publisher chat confirmations post as (Connecteam admin → Settings → Feed settings → Custom Publishers, if you haven't made one yet).
 5. **Default Break Types** — only shown if manual breaks are enabled on that Time Clock; picks the default label for unpaid and paid breaks (actual durations always come from the Schedule Export).
