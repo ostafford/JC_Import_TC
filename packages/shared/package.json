@@ -9,7 +9,11 @@
     "build": "tsc -b",
     "test": "node --test dist/**/*.test.js"
   },
+  "dependencies": {
+    "exceljs": "^4.4.0"
+  },
   "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^5.6.0"
   }
 }

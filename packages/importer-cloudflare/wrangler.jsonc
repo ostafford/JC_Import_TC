@@ -1,7 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sch-import-importer",
-  "main": "src/index.ts",
+  // Points at a committed, generated bundle, not live TS source — the
+  // "Deploy to Cloudflare" button installs from this directory in isolation
+  // and can't resolve `@sch-import/shared` as a workspace dependency, so the
+  // deployed entry point must already have it inlined. Regenerate via
+  // `npm run bundle` (or `npm run deploy`, which bundles first) after any
+  // change to this package's src/ or to packages/shared — `npm run dev` uses
+  // live src/index.ts instead and ignores this.
+  "main": "release/index.js",
   "compatibility_date": "2026-09-25",
   // exceljs (unzipping/parsing the Schedule Export) leans on Node internals
   // (zlib/streams) under the hood — needed for it to run on Workers at all.

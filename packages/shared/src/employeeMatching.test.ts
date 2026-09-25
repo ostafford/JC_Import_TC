@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { asExportEmployeeName, asUserId } from "@sch-import/shared";
+import { asExportEmployeeName, asUserId } from "./vocabulary.js";
 import { matchEmployeesByName, type UserLookup } from "./employeeMatching.js";
 
 function fakeClient(users: Array<{ userId: string; firstName: string; lastName: string; isArchived: boolean }>): UserLookup {

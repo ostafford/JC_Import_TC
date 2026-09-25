@@ -1,6 +1,6 @@
-import type { ConnecteamClient } from "./connecteamClient.js";
-import type { ImportRunOutcome } from "./importRun.js";
+import type { ConnecteamClient } from "./connecteam/client.js";
 import type { ConversationId, PublisherId } from "./vocabulary.js";
+import type { ImportRunOutcome } from "./importRun.js";
 
 const TEXT_CHAR_BUDGET = 480; // stay well under Connecteam's self-contradicting 500/1000 char guidance (issue 05)
 
@@ -33,7 +33,7 @@ export async function sendImportResultToChat(
   const reportCsv = buildReportCsv(outcome);
   const fileId = await client.uploadChatAttachment(
     `import-report-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`,
-    new TextEncoder().encode(reportCsv).buffer as ArrayBuffer,
+    Buffer.from(reportCsv, "utf8"),
     "text/csv",
   );
 
@@ -46,7 +46,11 @@ export async function sendImportResultToChat(
 }
 
 /** For the systemic-abort case (issue 04): auth/authorization failure from the API itself. */
-export async function sendImportAbortedToChat(client: ConnecteamClient, config: ChatConfirmationConfig, detail: string): Promise<void> {
+export async function sendImportAbortedToChat(
+  client: ConnecteamClient,
+  config: ChatConfirmationConfig,
+  detail: string,
+): Promise<void> {
   await client.postChatMessage({
     conversationId: config.conversationId,
     senderId: config.senderId,
@@ -64,7 +68,11 @@ export async function sendImportAbortedToChat(client: ConnecteamClient, config: 
  * failing — and this Importer never retries automatically (writes aren't
  * idempotent), so nothing will fix itself. The Admin must know to check.
  */
-export async function sendImportCrashedToChat(client: ConnecteamClient, config: ChatConfirmationConfig, detail: string): Promise<void> {
+export async function sendImportCrashedToChat(
+  client: ConnecteamClient,
+  config: ChatConfirmationConfig,
+  detail: string,
+): Promise<void> {
   await client.postChatMessage({
     conversationId: config.conversationId,
     senderId: config.senderId,
@@ -80,7 +88,9 @@ function summaryText(outcome: ImportRunOutcome): string {
     .filter(([, count]) => count > 0)
     .map(([reason, count]) => `${count} ${humanizeReason(reason)}`);
 
-  const lockedDayNames = outcome.rows.filter((r) => r.reason === "locked-day").map((r) => r.employeeName);
+  const lockedDayNames = outcome.rows
+    .filter((r) => r.reason === "locked-day")
+    .map((r) => r.employeeName);
   const lockedDayNote = lockedDayNames.length > 0 ? ` Locked day(s) for: ${Array.from(new Set(lockedDayNames)).join(", ")}.` : "";
 
   return `Imported ${outcome.succeeded}/${outcome.totalRows} shifts. Skipped: ${skippedParts.join(", ")}.${lockedDayNote} Full detail attached.`;
@@ -92,7 +102,9 @@ function humanizeReason(reason: string): string {
 
 function buildReportCsv(outcome: ImportRunOutcome): string {
   const header = "date,employee name,outcome,reason,detail";
-  const lines = outcome.rows.map((r) => [r.date, r.employeeName, r.outcome, r.reason ?? "", r.detail ?? ""].map(csvEscape).join(","));
+  const lines = outcome.rows.map((r) =>
+    [r.date, r.employeeName, r.outcome, r.reason ?? "", r.detail ?? ""].map(csvEscape).join(","),
+  );
   return [header, ...lines].join("\n") + "\n";
 }
 

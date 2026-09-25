@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit",
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "dev": "wrangler dev src/index.ts",
+    "bundle": "wrangler deploy src/index.ts --dry-run --outdir=release && rm -f release/README.md",
+    "deploy": "npm run bundle && wrangler deploy"
   },
-  "dependencies": {
-    "exceljs": "^4.4.0"
+  "optionalDependencies": {
+    "@sch-import/shared": "0.1.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250101.0",

@@ -139,11 +139,13 @@ npx wrangler secret put CONNECTEAM_API_TOKEN
 npx wrangler secret put WEBHOOK_SHARED_SECRET
 ```
 
-Then set the plain vars (`CONVERSATION_ID`, `TIME_CLOCK_ID`, `SENDER_ID`, `MANUAL_BREAKS_ENABLED`, break type IDs) in `packages/importer-cloudflare/wrangler.jsonc` and run `npx wrangler deploy`.
+Then set the plain vars (`CONVERSATION_ID`, `TIME_CLOCK_ID`, `SENDER_ID`, `MANUAL_BREAKS_ENABLED`, break type IDs) in `packages/importer-cloudflare/wrangler.jsonc` and run `npm run deploy --workspace packages/importer-cloudflare` (bundles fresh, then deploys — see the note below).
 
 **Either way**, paste this Worker's URL (shown after deploy — no path suffix, it's a single endpoint) into the Relay's Chat Link form as the Importer's webhook endpoint.
 
 The Importer's `fetch` handler only validates the incoming trigger and enqueues it — the actual Import Run runs in a separate queue-consumer invocation.
+
+**A note for anyone changing this Importer's code**: the button installs from `packages/importer-cloudflare` in isolation and can't resolve `@sch-import/shared` as a workspace dependency (it's private, not on npm) — so `wrangler.jsonc`'s `main` points at a committed, pre-bundled `packages/importer-cloudflare/release/index.js` instead of live source, and `@sch-import/shared` is declared as an `optionalDependency` so the button's `npm install` doesn't hard-fail trying to fetch it. If you change anything in `packages/importer-cloudflare/src` or `packages/shared`, run `npm run bundle --workspace packages/importer-cloudflare` and commit the regenerated `release/` before the button (or a plain `npx wrangler deploy`) will reflect it. `npm run dev --workspace packages/importer-cloudflare` bundles live from `src/index.ts` instead and is unaffected.
 
 ## Project layout
 

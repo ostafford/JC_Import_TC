@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
-import { exportLocalTimeToUtc, parseBreakDurationMinutes } from "./dateTime.js";
 import { asExportEmployeeName, type ExportEmployeeName } from "./vocabulary.js";
+import { exportLocalTimeToUtc, parseBreakDurationMinutes } from "./dateTime.js";
 
 /**
  * Exact 23-column schema confirmed against two real exports in issue 01.
@@ -70,9 +70,16 @@ export interface ScheduleExportRow {
 
 export class ScheduleExportFormatError extends Error {}
 
-export async function parseScheduleExport(content: ArrayBuffer): Promise<ScheduleExportRow[]> {
+/**
+ * Takes whatever bytes the caller already has in hand — a Node `Buffer` from
+ * `fs.readFile`/an HTTP body, or the Worker's `ArrayBuffer` from
+ * `Response.arrayBuffer()` — since exceljs's `Workbook#xlsx.load` accepts
+ * either at runtime (its own bundled types just predate current @types/node's
+ * generic `Buffer`, hence the cast below; harmless).
+ */
+export async function parseScheduleExport(content: Buffer | ArrayBuffer): Promise<ScheduleExportRow[]> {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(content);
+  await workbook.xlsx.load(content as unknown as ArrayBuffer);
 
   const sheet = workbook.worksheets[0];
   if (!sheet) throw new ScheduleExportFormatError("Schedule Export has no worksheet");

@@ -1,14 +1,7 @@
-import {
-  ConnecteamApiError,
-  ConnecteamAuthError,
-  type BreakTypeId,
-  type ConnecteamClient,
-  type JobId,
-  type TimeClockId,
-  type UserId,
-} from "@sch-import/shared";
+import { ConnecteamApiError, ConnecteamAuthError, type ConnecteamClient } from "./connecteam/client.js";
 import { matchEmployeesByName } from "./employeeMatching.js";
 import type { ScheduleExportRow } from "./scheduleExport.js";
+import type { BreakTypeId, JobId, TimeClockId, UserId } from "./vocabulary.js";
 
 /** Only the write operations this module needs — keeps it mockable without a real ConnecteamClient. */
 export type ImportWriter = Pick<

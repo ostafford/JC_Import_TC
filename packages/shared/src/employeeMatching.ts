@@ -1,5 +1,5 @@
-import type { ConnecteamClient } from "./connecteamClient.js";
-import type { ConnecteamUser } from "./types.js";
+import type { ConnecteamClient } from "./connecteam/client.js";
+import type { ConnecteamUser } from "./connecteam/types.js";
 import { type ExportEmployeeName, type UserId } from "./vocabulary.js";
 
 export type EmployeeMatchOutcome =

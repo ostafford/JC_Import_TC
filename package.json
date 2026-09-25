@@ -9,7 +9,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace packages/shared && npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "importer": "npm run start --workspace packages/importer",
     "relay": "npm run start --workspace packages/relay",

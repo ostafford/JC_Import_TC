@@ -1,10 +1,15 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { ConnecteamAuthError, ConnecteamClient } from "@sch-import/shared";
-import { sendImportAbortedToChat, sendImportResultToChat } from "./chatConfirmation.js";
+import {
+  ConnecteamAuthError,
+  ConnecteamClient,
+  runImportRun,
+  parseScheduleExport,
+  sendImportAbortedToChat,
+  sendImportCrashedToChat,
+  sendImportResultToChat,
+} from "@sch-import/shared";
 import type { ImporterConfig } from "./config.js";
-import { runImportRun } from "./importRun.js";
-import { parseScheduleExport } from "./scheduleExport.js";
 
 const SIGNATURE_HEADER = "x-relay-signature";
 
@@ -67,7 +72,9 @@ async function handleRequest(
   res.writeHead(202).end();
 
   processTrigger(client, config, payload).catch((err) => {
-    console.error("Import Run crashed:", err);
+    // processTrigger always tries to notify Chat itself before this ever
+    // runs (issue 18) — this is a last-resort log only, not the Admin's notice.
+    console.error("Import Run crashed (no retry — see Chat for the Admin-facing notice):", err);
   });
 }
 
@@ -78,10 +85,10 @@ async function processTrigger(
 ): Promise<void> {
   const chatConfig = { conversationId: config.conversationId, senderId: config.senderId };
 
-  const fileContent = await client.downloadAttachment(payload.attachmentUrl);
-  const rows = await parseScheduleExport(fileContent);
-
   try {
+    const fileContent = await client.downloadAttachment(payload.attachmentUrl);
+    const rows = await parseScheduleExport(fileContent);
+
     const outcome = await runImportRun(client, rows, {
       timeClockId: config.timeClockId,
       manualBreaksEnabled: config.manualBreaksEnabled,
@@ -97,6 +104,11 @@ async function processTrigger(
       await sendImportAbortedToChat(client, chatConfig, err.message);
       return;
     }
+
+    const detail = err instanceof Error ? err.message : String(err);
+    await sendImportCrashedToChat(client, chatConfig, detail).catch((notifyErr) =>
+      console.error("Also failed to notify Chat about the crash:", notifyErr),
+    );
     throw err;
   }
 }

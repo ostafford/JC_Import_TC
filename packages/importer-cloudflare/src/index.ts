@@ -1,18 +1,21 @@
-import { sendImportAbortedToChat, sendImportCrashedToChat, sendImportResultToChat } from "./chatConfirmation.js";
-import { ConnecteamAuthError, ConnecteamClient } from "./connecteamClient.js";
-import { hmacSha256Hex, timingSafeEqualStr } from "./crypto.js";
-import { runImportRun } from "./importRun.js";
-import { parseScheduleExport } from "./scheduleExport.js";
 import {
   asBreakTypeId,
   asConversationId,
   asPublisherId,
   asTimeClockId,
+  ConnecteamAuthError,
+  ConnecteamClient,
+  parseScheduleExport,
+  runImportRun,
+  sendImportAbortedToChat,
+  sendImportCrashedToChat,
+  sendImportResultToChat,
   type BreakTypeId,
   type ConversationId,
   type PublisherId,
   type TimeClockId,
-} from "./vocabulary.js";
+} from "@sch-import/shared";
+import { hmacSha256Hex, timingSafeEqualStr } from "./crypto.js";
 
 const SIGNATURE_HEADER = "x-relay-signature";
 

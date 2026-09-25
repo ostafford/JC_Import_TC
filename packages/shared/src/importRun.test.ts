@@ -9,7 +9,7 @@ import {
   asTimeActivityId,
   asTimeClockId,
   asUserId,
-} from "@sch-import/shared";
+} from "./index.js";
 import { runImportRun, type ImportWriter } from "./importRun.js";
 import type { ScheduleExportRow } from "./scheduleExport.js";
 
