@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sch-import-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-25",
+
+  // One Durable Object instance per deployment (issue 14: no multi-tenancy
+  // to shard within a single company's own self-hosted Relay — ADR 0001).
+  "durable_objects": {
+    "bindings": [{ "name": "RELAY", "class_name": "RelayObject" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RelayObject"] }],
+
+  "observability": { "enabled": true }
+}

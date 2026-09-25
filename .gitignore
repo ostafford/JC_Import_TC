@@ -8,3 +8,4 @@ dist/
 .DS_Store
 relay.data.json
 importer.config.json
+.wrangler/
