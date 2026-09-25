@@ -3,19 +3,16 @@ import {
   asConversationId,
   asPublisherId,
   asTimeClockId,
-  ConnecteamAuthError,
   ConnecteamClient,
-  parseScheduleExport,
-  runImportRun,
-  sendImportAbortedToChat,
-  sendImportCrashedToChat,
-  sendImportResultToChat,
+  processImportTrigger,
+  verifyRelayTrigger,
   type BreakTypeId,
   type ConversationId,
   type PublisherId,
+  type RelayTriggerPayload,
+  type RelayTriggerVerificationFailure,
   type TimeClockId,
 } from "@sch-import/shared";
-import { hmacSha256Hex, timingSafeEqualStr } from "./crypto.js";
 
 const SIGNATURE_HEADER = "x-relay-signature";
 
@@ -31,12 +28,6 @@ export interface Env {
   UNPAID_BREAK_TYPE_ID?: string;
   PAID_BREAK_TYPE_ID?: string;
   IMPORT_QUEUE: Queue<RelayTriggerPayload>;
-}
-
-interface RelayTriggerPayload {
-  conversationId: string;
-  messageId: string;
-  attachmentUrl: string;
 }
 
 /**
@@ -73,20 +64,18 @@ export default {
     const rawBody = await request.arrayBuffer();
     const signature = request.headers.get(SIGNATURE_HEADER);
 
-    if (!signature || !(await isValidSignature(rawBody, signature, env.WEBHOOK_SHARED_SECRET))) {
-      return new Response(null, { status: 401 });
+    const verification = await verifyRelayTrigger(
+      rawBody,
+      signature,
+      env.WEBHOOK_SHARED_SECRET,
+      asConversationId(env.CONVERSATION_ID),
+    );
+
+    if (!verification.ok) {
+      return new Response(null, { status: statusForFailure(verification.reason) });
     }
 
-    const payload = parsePayload(rawBody);
-    if (!payload) {
-      return new Response(null, { status: 400 });
-    }
-
-    if (payload.conversationId !== env.CONVERSATION_ID) {
-      return new Response(null, { status: 403 });
-    }
-
-    await env.IMPORT_QUEUE.send(payload);
+    await env.IMPORT_QUEUE.send(verification.payload);
     return new Response(null, { status: 202 });
   },
 
@@ -99,54 +88,38 @@ export default {
    * 2026-09-25): a crash partway through can mean some rows already wrote
    * real Time Activities, and this pipeline has no way to know which on a
    * second attempt — a blind retry duplicates writes instead of fixing
-   * anything. `processTrigger` always tries to notify Chat before this
-   * catch ever runs, so this is a last-resort log only, not the Admin's
-   * notice.
+   * anything. `processImportTrigger` always notifies Chat itself and never
+   * rejects, so this always acks.
    */
   async queue(batch: MessageBatch<RelayTriggerPayload>, env: Env): Promise<void> {
     for (const message of batch.messages) {
-      try {
-        await processTrigger(env, message.body);
-        message.ack();
-      } catch (err) {
-        console.error("Import Run crashed (no retry — see Chat for the Admin-facing notice):", err);
-        message.ack(); // never retry a partially-completed, non-idempotent write
-      }
+      const client = new ConnecteamClient({ apiToken: env.CONNECTEAM_API_TOKEN, baseUrl: env.CONNECTEAM_BASE_URL });
+      const config = configFromEnv(env);
+
+      await processImportTrigger(
+        client,
+        {
+          timeClockId: config.timeClockId,
+          manualBreaksEnabled: config.manualBreaksEnabled,
+          unpaidBreakTypeId: config.unpaidBreakTypeId,
+          paidBreakTypeId: config.paidBreakTypeId,
+        },
+        { conversationId: config.conversationId, senderId: config.senderId },
+        message.body,
+      );
+      message.ack();
     }
   },
 };
 
-async function processTrigger(env: Env, payload: RelayTriggerPayload): Promise<void> {
-  const client = new ConnecteamClient({ apiToken: env.CONNECTEAM_API_TOKEN, baseUrl: env.CONNECTEAM_BASE_URL });
-  const config = configFromEnv(env);
-  const chatConfig = { conversationId: config.conversationId, senderId: config.senderId };
-
-  try {
-    const fileContent = await client.downloadAttachment(payload.attachmentUrl);
-    const rows = await parseScheduleExport(fileContent);
-
-    const outcome = await runImportRun(client, rows, {
-      timeClockId: config.timeClockId,
-      manualBreaksEnabled: config.manualBreaksEnabled,
-      unpaidBreakTypeId: config.unpaidBreakTypeId,
-      paidBreakTypeId: config.paidBreakTypeId,
-    });
-    // Logged before the chat post so a downstream failure there (e.g. the
-    // attachment upload) doesn't leave this Import Run's outcome unrecoverable.
-    console.log("Import Run outcome:", JSON.stringify(outcome));
-    await sendImportResultToChat(client, chatConfig, outcome);
-  } catch (err) {
-    if (err instanceof ConnecteamAuthError) {
-      await sendImportAbortedToChat(client, chatConfig, err.message);
-      return;
-    }
-
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error("Import Run crashed before completing:", err);
-    await sendImportCrashedToChat(client, chatConfig, detail).catch((notifyErr) =>
-      console.error("Also failed to notify Chat about the crash:", notifyErr),
-    );
-    throw err;
+function statusForFailure(reason: RelayTriggerVerificationFailure): number {
+  switch (reason) {
+    case "bad-signature":
+      return 401;
+    case "malformed-payload":
+      return 400;
+    case "wrong-conversation":
+      return 403;
   }
 }
 
@@ -168,21 +141,4 @@ function configFromEnv(env: Env): ResolvedConfig {
     unpaidBreakTypeId: env.UNPAID_BREAK_TYPE_ID ? asBreakTypeId(env.UNPAID_BREAK_TYPE_ID) : undefined,
     paidBreakTypeId: env.PAID_BREAK_TYPE_ID ? asBreakTypeId(env.PAID_BREAK_TYPE_ID) : undefined,
   };
-}
-
-function parsePayload(rawBody: ArrayBuffer): RelayTriggerPayload | undefined {
-  try {
-    const json = JSON.parse(new TextDecoder().decode(rawBody));
-    if (typeof json?.conversationId === "string" && typeof json?.messageId === "string" && typeof json?.attachmentUrl === "string") {
-      return json as RelayTriggerPayload;
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function isValidSignature(rawBody: ArrayBuffer, signatureHeader: string, secret: string): Promise<boolean> {
-  const expected = await hmacSha256Hex(secret, rawBody);
-  return timingSafeEqualStr(expected, signatureHeader);
 }

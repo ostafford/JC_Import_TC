@@ -25312,11 +25312,47 @@ function truncate(text, max) {
 }
 __name(truncate, "truncate");
 
-// src/crypto.ts
+// ../shared/dist/importTrigger.js
+async function verifyRelayTrigger(rawBody, signatureHeader, secret, expectedConversationId) {
+  const bytes = ArrayBuffer.isView(rawBody) ? new Uint8Array(rawBody.buffer, rawBody.byteOffset, rawBody.byteLength) : new Uint8Array(rawBody);
+  if (!signatureHeader || !await isValidSignature(bytes, signatureHeader, secret)) {
+    return { ok: false, reason: "bad-signature" };
+  }
+  const payload = parsePayload(bytes);
+  if (!payload) {
+    return { ok: false, reason: "malformed-payload" };
+  }
+  if (payload.conversationId !== expectedConversationId) {
+    return { ok: false, reason: "wrong-conversation" };
+  }
+  return { ok: true, payload };
+}
+__name(verifyRelayTrigger, "verifyRelayTrigger");
+async function processImportTrigger(client, config, chatConfig, payload) {
+  try {
+    const fileContent = await client.downloadAttachment(payload.attachmentUrl);
+    const rows = await parseScheduleExport(fileContent);
+    const outcome = await runImportRun(client, rows, config);
+    console.log("Import Run outcome:", JSON.stringify(outcome));
+    await sendImportResultToChat(client, chatConfig, outcome);
+  } catch (err) {
+    if (err instanceof ConnecteamAuthError) {
+      await sendImportAbortedToChat(client, chatConfig, err.message).catch((notifyErr) => console.error("Also failed to notify Chat about the abort:", notifyErr));
+      return;
+    }
+    console.error("Import Run crashed (no retry \u2014 see Chat for the Admin-facing notice):", err);
+    const detail = err instanceof Error ? err.message : String(err);
+    await sendImportCrashedToChat(client, chatConfig, detail).catch((notifyErr) => console.error("Also failed to notify Chat about the crash:", notifyErr));
+  }
+}
+__name(processImportTrigger, "processImportTrigger");
+async function isValidSignature(bytes, signatureHeader, secret) {
+  const expected = await hmacSha256Hex(secret, bytes);
+  return timingSafeEqualStr(expected, signatureHeader);
+}
+__name(isValidSignature, "isValidSignature");
 async function hmacSha256Hex(secret, message) {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
-    "sign"
-  ]);
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const signature = await crypto.subtle.sign("HMAC", key, message);
   return Array.from(new Uint8Array(signature), (b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -25324,12 +25360,26 @@ __name(hmacSha256Hex, "hmacSha256Hex");
 function timingSafeEqualStr(a, b) {
   const aBytes = new TextEncoder().encode(a);
   const bBytes = new TextEncoder().encode(b);
-  if (aBytes.length !== bBytes.length) return false;
+  if (aBytes.length !== bBytes.length)
+    return false;
   let diff = 0;
-  for (let i = 0; i < aBytes.length; i++) diff |= aBytes[i] ^ bBytes[i];
+  for (let i = 0; i < aBytes.length; i++)
+    diff |= aBytes[i] ^ bBytes[i];
   return diff === 0;
 }
 __name(timingSafeEqualStr, "timingSafeEqualStr");
+function parsePayload(bytes) {
+  try {
+    const json = JSON.parse(new TextDecoder().decode(bytes));
+    if (typeof json?.conversationId === "string" && typeof json?.messageId === "string" && typeof json?.attachmentUrl === "string") {
+      return json;
+    }
+    return void 0;
+  } catch {
+    return void 0;
+  }
+}
+__name(parsePayload, "parsePayload");
 
 // src/index.ts
 var SIGNATURE_HEADER = "x-relay-signature";
@@ -25340,17 +25390,16 @@ var index_default = {
     }
     const rawBody = await request.arrayBuffer();
     const signature = request.headers.get(SIGNATURE_HEADER);
-    if (!signature || !await isValidSignature(rawBody, signature, env.WEBHOOK_SHARED_SECRET)) {
-      return new Response(null, { status: 401 });
+    const verification = await verifyRelayTrigger(
+      rawBody,
+      signature,
+      env.WEBHOOK_SHARED_SECRET,
+      asConversationId(env.CONVERSATION_ID)
+    );
+    if (!verification.ok) {
+      return new Response(null, { status: statusForFailure(verification.reason) });
     }
-    const payload = parsePayload(rawBody);
-    if (!payload) {
-      return new Response(null, { status: 400 });
-    }
-    if (payload.conversationId !== env.CONVERSATION_ID) {
-      return new Response(null, { status: 403 });
-    }
-    await env.IMPORT_QUEUE.send(payload);
+    await env.IMPORT_QUEUE.send(verification.payload);
     return new Response(null, { status: 202 });
   },
   /**
@@ -25362,51 +25411,39 @@ var index_default = {
    * 2026-09-25): a crash partway through can mean some rows already wrote
    * real Time Activities, and this pipeline has no way to know which on a
    * second attempt — a blind retry duplicates writes instead of fixing
-   * anything. `processTrigger` always tries to notify Chat before this
-   * catch ever runs, so this is a last-resort log only, not the Admin's
-   * notice.
+   * anything. `processImportTrigger` always notifies Chat itself and never
+   * rejects, so this always acks.
    */
   async queue(batch, env) {
     for (const message of batch.messages) {
-      try {
-        await processTrigger(env, message.body);
-        message.ack();
-      } catch (err) {
-        console.error("Import Run crashed (no retry \u2014 see Chat for the Admin-facing notice):", err);
-        message.ack();
-      }
+      const client = new ConnecteamClient({ apiToken: env.CONNECTEAM_API_TOKEN, baseUrl: env.CONNECTEAM_BASE_URL });
+      const config = configFromEnv(env);
+      await processImportTrigger(
+        client,
+        {
+          timeClockId: config.timeClockId,
+          manualBreaksEnabled: config.manualBreaksEnabled,
+          unpaidBreakTypeId: config.unpaidBreakTypeId,
+          paidBreakTypeId: config.paidBreakTypeId
+        },
+        { conversationId: config.conversationId, senderId: config.senderId },
+        message.body
+      );
+      message.ack();
     }
   }
 };
-async function processTrigger(env, payload) {
-  const client = new ConnecteamClient({ apiToken: env.CONNECTEAM_API_TOKEN, baseUrl: env.CONNECTEAM_BASE_URL });
-  const config = configFromEnv(env);
-  const chatConfig = { conversationId: config.conversationId, senderId: config.senderId };
-  try {
-    const fileContent = await client.downloadAttachment(payload.attachmentUrl);
-    const rows = await parseScheduleExport(fileContent);
-    const outcome = await runImportRun(client, rows, {
-      timeClockId: config.timeClockId,
-      manualBreaksEnabled: config.manualBreaksEnabled,
-      unpaidBreakTypeId: config.unpaidBreakTypeId,
-      paidBreakTypeId: config.paidBreakTypeId
-    });
-    console.log("Import Run outcome:", JSON.stringify(outcome));
-    await sendImportResultToChat(client, chatConfig, outcome);
-  } catch (err) {
-    if (err instanceof ConnecteamAuthError) {
-      await sendImportAbortedToChat(client, chatConfig, err.message);
-      return;
-    }
-    const detail = err instanceof Error ? err.message : String(err);
-    console.error("Import Run crashed before completing:", err);
-    await sendImportCrashedToChat(client, chatConfig, detail).catch(
-      (notifyErr) => console.error("Also failed to notify Chat about the crash:", notifyErr)
-    );
-    throw err;
+function statusForFailure(reason) {
+  switch (reason) {
+    case "bad-signature":
+      return 401;
+    case "malformed-payload":
+      return 400;
+    case "wrong-conversation":
+      return 403;
   }
 }
-__name(processTrigger, "processTrigger");
+__name(statusForFailure, "statusForFailure");
 function configFromEnv(env) {
   return {
     conversationId: asConversationId(env.CONVERSATION_ID),
@@ -25418,23 +25455,6 @@ function configFromEnv(env) {
   };
 }
 __name(configFromEnv, "configFromEnv");
-function parsePayload(rawBody) {
-  try {
-    const json = JSON.parse(new TextDecoder().decode(rawBody));
-    if (typeof json?.conversationId === "string" && typeof json?.messageId === "string" && typeof json?.attachmentUrl === "string") {
-      return json;
-    }
-    return void 0;
-  } catch {
-    return void 0;
-  }
-}
-__name(parsePayload, "parsePayload");
-async function isValidSignature(rawBody, signatureHeader, secret) {
-  const expected = await hmacSha256Hex(secret, rawBody);
-  return timingSafeEqualStr(expected, signatureHeader);
-}
-__name(isValidSignature, "isValidSignature");
 export {
   index_default as default
 };

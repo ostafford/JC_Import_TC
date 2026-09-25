@@ -9,13 +9,16 @@ export interface ChatConfirmationConfig {
   senderId: PublisherId;
 }
 
+/** Only the chat-posting operations these functions need — keeps them mockable without a real ConnecteamClient. */
+export type ChatSender = Pick<ConnecteamClient, "postChatMessage" | "uploadChatAttachment">;
+
 /**
  * Always posts a result message (issue 05) — Chat is the only interface for
  * this tool, so silence would be ambiguous. Full success gets a one-liner;
  * anything else gets a short text summary plus an attached per-row report.
  */
 export async function sendImportResultToChat(
-  client: ConnecteamClient,
+  client: ChatSender,
   config: ChatConfirmationConfig,
   outcome: ImportRunOutcome,
 ): Promise<void> {
@@ -47,7 +50,7 @@ export async function sendImportResultToChat(
 
 /** For the systemic-abort case (issue 04): auth/authorization failure from the API itself. */
 export async function sendImportAbortedToChat(
-  client: ConnecteamClient,
+  client: ChatSender,
   config: ChatConfirmationConfig,
   detail: string,
 ): Promise<void> {
@@ -69,7 +72,7 @@ export async function sendImportAbortedToChat(
  * idempotent), so nothing will fix itself. The Admin must know to check.
  */
 export async function sendImportCrashedToChat(
-  client: ConnecteamClient,
+  client: ChatSender,
   config: ChatConfirmationConfig,
   detail: string,
 ): Promise<void> {
