@@ -9,3 +9,4 @@ dist/
 relay.data.json
 importer.config.json
 .wrangler/
+.dev.vars

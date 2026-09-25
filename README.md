@@ -13,7 +13,7 @@ Both are cloned and run from this same repo, self-hosted by whoever deploys them
 
 - Node.js >= 20
 - A Connecteam account on the Expert plan (required for API token access), with admin rights to create an API token and a Custom Publisher
-- A way to expose two local ports to the public internet: one for the Relay, one for the Importer. Any tunnel tool works (e.g. `cloudflared tunnel --url http://localhost:8788`, or `ngrok`). This is needed during setup and for as long as the integration should keep running — **or**, for the Relay only, deploy it to Cloudflare instead and skip its tunnel entirely (see [Deploying the Relay to Cloudflare](#deploying-the-relay-to-cloudflare-optional) below). The Importer still needs a tunnel either way for now — it doesn't have a Cloudflare option yet.
+- A way to expose two local ports to the public internet: one for the Relay, one for the Importer. Any tunnel tool works (e.g. `cloudflared tunnel --url http://localhost:8788`, or `ngrok`). This is needed during setup and for as long as the integration should keep running — **or** deploy either piece (or both) to Cloudflare instead and skip its tunnel entirely (see [Deploying to Cloudflare](#deploying-to-cloudflare-optional) below, including its cost note — the Importer's Cloudflare option isn't free).
 
 ## Setup
 
@@ -102,36 +102,46 @@ npm run importer -- setup
 
 This prompts for the same information as the wizard, has Connecteam create the webhook automatically instead of walking through it in Connecteam's UI, and prints the values you'd need to paste into the Relay's dashboard by hand.
 
-## Deploying the Relay to Cloudflare (optional)
+## Deploying to Cloudflare (optional)
 
-The Relay can run as a Cloudflare Worker instead of a local process + tunnel — no laptop needs to stay on, and it gets a stable public URL that never changes across restarts. The Importer doesn't have a Cloudflare option yet (only the Relay does so far) — mixing the two (Cloudflare Relay + local Importer) is a fully supported combination, and arguably the one worth defaulting to: the Relay is the public-facing piece with no sensitive token, while the Importer — which holds your real Connecteam API token — stays on your own network either way.
+Both the Relay and the Importer can run as Cloudflare Workers instead of local processes + tunnels — no laptop needs to stay on, and each gets a stable public URL that never changes across restarts. They're independent choices: run one, the other, or both, in any combination. The browser wizard doesn't drive any Cloudflare deployment yet — use the CLI setup fallback (`npm run importer -- setup`, described above) either way, then paste values in by hand as described per-piece below.
+
+**Cost note**: the Relay is free either way. The Importer needs the **Workers Paid plan (~$5/month)**, not Free — its per-row Connecteam API calls (issue 08: 45 rows → ~140 calls in one real run) exceed the Free plan's 50-subrequest-per-invocation limit. A useful combination for a security-conscious Admin: Relay on Cloudflare (public-facing, never holds your Connecteam token, free) + Importer local (holds your real token, stays on your own network, also free) — full Cloudflare is the easiest to run continuously, but isn't free.
+
+### Relay
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ostafford/JS_Import_TC/tree/main/packages/relay-cloudflare)
 
-Or manually:
+Or manually: `cd packages/relay-cloudflare && npx wrangler deploy`
 
-```
-cd packages/relay-cloudflare
-npx wrangler deploy
-```
+Either way, this prints the Worker's public URL (`https://sch-import-relay.<your-subdomain>.workers.dev` by default) — that's the Relay's webhook URL for the rest of setup. To finish: run `npm run importer -- setup` using this URL (with `/webhooks/connecteam` appended) as the Relay webhook URL when prompted, then open the Cloudflare Relay's URL and sign in — read the magic link from `npx wrangler tail` (run from `packages/relay-cloudflare`) since no email provider is configured by default — and paste the values `importer setup` printed into the Chat Link form.
 
-Either way, this prints the Worker's public URL (`https://sch-import-relay.<your-subdomain>.workers.dev` by default) — that's the Relay's webhook URL for the rest of setup.
+### Importer
 
-**Finishing setup uses the CLI fallback above, not the browser wizard** — the wizard only knows how to save a Chat Link on a *locally-running* Relay, not a Cloudflare-hosted one. Instead:
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ostafford/JS_Import_TC/tree/main/packages/importer-cloudflare)
 
-1. Run `npm run importer -- setup` as described above, using the Cloudflare Relay's URL (with `/webhooks/connecteam` appended) as the Relay webhook URL when prompted.
-2. Open the Cloudflare Relay's URL and sign in. No email provider is configured by default, so read the magic link from `npx wrangler tail` (run from `packages/relay-cloudflare`) instead of your inbox.
-3. Paste the values `importer setup` printed into the Chat Link form.
+Or manually: `cd packages/importer-cloudflare && npx wrangler deploy`
+
+Unlike the Relay, the Importer needs its config set before (or right after) deploying — there's no dashboard/form for it:
+
+1. Create the queue once: `npx wrangler queues create sch-import-triggers` (from `packages/importer-cloudflare`).
+2. Run `npm run importer -- setup` (if you haven't already) to get the values it prints, then set them as Worker vars in `packages/importer-cloudflare/wrangler.jsonc` (`CONVERSATION_ID`, `TIME_CLOCK_ID`, `SENDER_ID`, `MANUAL_BREAKS_ENABLED`, and `UNPAID_BREAK_TYPE_ID`/`PAID_BREAK_TYPE_ID` if manual breaks are enabled).
+3. Set the two secrets (never in `wrangler.jsonc`): `npx wrangler secret put CONNECTEAM_API_TOKEN` and `npx wrangler secret put WEBHOOK_SHARED_SECRET` (the shared secret `importer setup` generated).
+4. Deploy (or redeploy, if you already had): `npx wrangler deploy`.
+5. Paste this Worker's URL (with no path suffix — it's a single endpoint) into the Relay's Chat Link form as the Importer's webhook endpoint.
+
+The Importer's `fetch` handler only validates the incoming trigger and enqueues it — the actual Import Run runs in a separate queue-consumer invocation, which is why the queue has to exist before the Worker that references it can deploy.
 
 ## Project layout
 
 ```
 packages/
-  shared/            Connecteam API client and shared types/vocabulary
-  relay/             the Relay: Chat Link storage, admin login, webhook forwarding
-  relay-cloudflare/  the Relay, ported to run as a Cloudflare Worker (optional — see above)
-  importer/          the Importer: Schedule Export parsing, Time Activity writes, CLI
-  wizard/            the browser-based setup wizard described above
+  shared/              Connecteam API client and shared types/vocabulary
+  relay/               the Relay: Chat Link storage, admin login, webhook forwarding
+  relay-cloudflare/    the Relay, ported to run as a Cloudflare Worker (optional — see above)
+  importer/            the Importer: Schedule Export parsing, Time Activity writes, CLI
+  importer-cloudflare/ the Importer, ported to run as a Cloudflare Worker + Queue (optional — see above)
+  wizard/              the browser-based setup wizard described above
 docs/adr/    architecture decision records
 CONTEXT.md   project vocabulary
 ```
