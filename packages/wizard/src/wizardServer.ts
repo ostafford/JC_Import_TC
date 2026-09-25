@@ -79,7 +79,7 @@ async function route(req: IncomingMessage, res: ServerResponse, config: WizardCo
   if (method === "GET" && url.pathname === "/step/time-clock") {
     if (!state.webhookVerified) return redirectTo(res, "/step/webhook-verify");
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(renderTimeClockStep());
+    res.end(renderTimeClockStep(state));
     return;
   }
   if (method === "POST" && url.pathname === "/step/time-clock") {

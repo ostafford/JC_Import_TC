@@ -118,19 +118,32 @@ Either way, this prints the Worker's public URL (`https://sch-import-relay.<your
 
 ### Importer
 
+Either way, run `npm run importer -- setup` first (if you haven't already) against your real Connecteam account — you'll need the values it prints (`conversationId`, `timeClockId`, `senderId`, `manualBreaksEnabled`, break type IDs, and a generated shared secret) for either path below.
+
+**Using the button** (no terminal needed for anything after clicking it):
+
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ostafford/JS_Import_TC/tree/main/packages/importer-cloudflare)
 
-Or manually: `cd packages/importer-cloudflare && npx wrangler deploy`
+This also creates the queue the Importer depends on automatically — Cloudflare's button provisions Queues (and Durable Objects, KV, D1, R2, etc.) declared in the repo's Wrangler config, the same as a manual `wrangler queues create` would. Once it's deployed, set the config entirely through the dashboard, no CLI: open this Worker at **Workers & Pages → (your Worker) → Settings → Variables and Secrets → Add**, and add:
+- **Secrets**: `CONNECTEAM_API_TOKEN`, `WEBHOOK_SHARED_SECRET` (from `importer setup`'s output)
+- **Plain vars**: `CONVERSATION_ID`, `TIME_CLOCK_ID`, `SENDER_ID`, `MANUAL_BREAKS_ENABLED`, and `UNPAID_BREAK_TYPE_ID`/`PAID_BREAK_TYPE_ID` if manual breaks are enabled
 
-Unlike the Relay, the Importer needs its config set before (or right after) deploying — there's no dashboard/form for it:
+Then click **Deploy** in the dashboard to apply them.
 
-1. Create the queue once: `npx wrangler queues create sch-import-triggers` (from `packages/importer-cloudflare`).
-2. Run `npm run importer -- setup` (if you haven't already) to get the values it prints, then set them as Worker vars in `packages/importer-cloudflare/wrangler.jsonc` (`CONVERSATION_ID`, `TIME_CLOCK_ID`, `SENDER_ID`, `MANUAL_BREAKS_ENABLED`, and `UNPAID_BREAK_TYPE_ID`/`PAID_BREAK_TYPE_ID` if manual breaks are enabled).
-3. Set the two secrets (never in `wrangler.jsonc`): `npx wrangler secret put CONNECTEAM_API_TOKEN` and `npx wrangler secret put WEBHOOK_SHARED_SECRET` (the shared secret `importer setup` generated).
-4. Deploy (or redeploy, if you already had): `npx wrangler deploy`.
-5. Paste this Worker's URL (with no path suffix — it's a single endpoint) into the Relay's Chat Link form as the Importer's webhook endpoint.
+**Manually (CLI)**:
 
-The Importer's `fetch` handler only validates the incoming trigger and enqueues it — the actual Import Run runs in a separate queue-consumer invocation, which is why the queue has to exist before the Worker that references it can deploy.
+```
+cd packages/importer-cloudflare
+npx wrangler queues create sch-import-triggers
+npx wrangler secret put CONNECTEAM_API_TOKEN
+npx wrangler secret put WEBHOOK_SHARED_SECRET
+```
+
+Then set the plain vars (`CONVERSATION_ID`, `TIME_CLOCK_ID`, `SENDER_ID`, `MANUAL_BREAKS_ENABLED`, break type IDs) in `packages/importer-cloudflare/wrangler.jsonc` and run `npx wrangler deploy`.
+
+**Either way**, paste this Worker's URL (shown after deploy — no path suffix, it's a single endpoint) into the Relay's Chat Link form as the Importer's webhook endpoint.
+
+The Importer's `fetch` handler only validates the incoming trigger and enqueues it — the actual Import Run runs in a separate queue-consumer invocation.
 
 ## Project layout
 

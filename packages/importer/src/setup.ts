@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline/promises";
-import { ConnecteamClient, asTimeClockId, type ManualBreakType } from "@sch-import/shared";
+import { ConnecteamClient, type ManualBreakType } from "@sch-import/shared";
 import { persistSetupConfig } from "./config.js";
 import { buildPersistedConfig, generateWebhookSecrets } from "./setupSteps.js";
 
@@ -34,7 +34,13 @@ export async function runSetup(): Promise<void> {
     console.log("Creating a webhook scoped to this conversation...");
     await client.createConversationWebhook(chosen.conversationId, relayWebhookUrl, connecteamWebhookSecret);
 
-    const timeClockId = await rl.question("\nTime Clock ID (used for Time Activities + manual breaks): ");
+    console.log("\nFetching your Connecteam time clocks...");
+    const timeClocks = await client.listTimeClocks();
+    if (timeClocks.length === 0) throw new Error("No time clocks returned — nothing to write Time Activities to.");
+    timeClocks.forEach((tc, i) => console.log(`  [${i}] ${tc.name}${tc.isArchived ? " (archived)" : ""}`));
+    const chosenTimeClock = timeClocks[Number(await rl.question("\nPick the Time Clock to write to (index): "))];
+    if (!chosenTimeClock) throw new Error("Invalid selection");
+    const timeClockId = chosenTimeClock.timeClockId;
     console.log(
       "\nChat confirmations post as a Custom Publisher, not as you — Connecteam's Chat API requires it " +
         "(confirmed 2026-09-22, corrects this project's original assumption). If you haven't already, create " +
@@ -44,7 +50,7 @@ export async function runSetup(): Promise<void> {
     const senderId = await rl.question("Custom Publisher ID (used as this Importer's chat sender): ");
 
     console.log("\nReading manual break configuration...");
-    const breaksConfig = await client.getManualBreaksConfig(asTimeClockId(timeClockId));
+    const breaksConfig = await client.getManualBreaksConfig(timeClockId);
 
     let unpaidBreakTypeId: string | undefined;
     let paidBreakTypeId: string | undefined;

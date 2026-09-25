@@ -34,9 +34,9 @@ export async function handleTokenStep(
 
   const client = new ConnecteamClient({ apiToken, baseUrl: connecteamBaseUrl });
 
-  let conversations;
+  let conversations, timeClocks;
   try {
-    conversations = await client.listConversations();
+    [conversations, timeClocks] = await Promise.all([client.listConversations(), client.listTimeClocks()]);
   } catch {
     res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
     res.end(renderTokenStep("Couldn't reach Connecteam with that token — check it's correct and try again."));
@@ -49,9 +49,16 @@ export async function handleTokenStep(
     return;
   }
 
+  if (timeClocks.length === 0) {
+    res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderTokenStep("That token works, but there are no Time Clocks to write to yet — set one up in Connecteam first."));
+    return;
+  }
+
   state.apiToken = apiToken;
   state.client = client;
   state.conversations = conversations;
+  state.timeClocks = timeClocks;
 
   res.writeHead(302, { Location: "/step/conversation" });
   res.end();

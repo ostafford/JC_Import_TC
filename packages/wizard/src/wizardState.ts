@@ -1,4 +1,4 @@
-import type { ChatConversation, ConnecteamClient, ManualBreaksConfig } from "@sch-import/shared";
+import type { ChatConversation, ConnecteamClient, ManualBreaksConfig, TimeClock } from "@sch-import/shared";
 
 /**
  * Single in-memory state object for one wizard run — no persistence, no
@@ -11,6 +11,7 @@ export interface WizardState {
   apiToken?: string;
   client?: ConnecteamClient;
   conversations?: ChatConversation[];
+  timeClocks?: TimeClock[];
   conversationId?: string;
   conversationName?: string;
   relayWebhookUrl?: string;

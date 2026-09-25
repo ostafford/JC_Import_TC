@@ -38,6 +38,19 @@ export interface ManualBreaksConfig {
   breakTypes: ManualBreakType[];
 }
 
+/**
+ * Confirmed via GET /time-clock/v1/time-clocks (developer.connecteam.com,
+ * 2026-09-25) — its own account's Time Clock IDs are not visible anywhere in
+ * Connecteam's web UI, so `importer setup` and the wizard both need this
+ * listing to let an Admin pick by name instead of typing a raw ID they have
+ * no way to find (discovered live — not anticipated by any prior ticket).
+ */
+export interface TimeClock {
+  timeClockId: TimeClockId;
+  name: string;
+  isArchived: boolean;
+}
+
 export interface ChatConversation {
   conversationId: ConversationId;
   name?: string;

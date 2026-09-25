@@ -2,6 +2,7 @@ import {
   asBreakTypeId,
   asJobId,
   asTimeActivityId,
+  asTimeClockId,
   asUserId,
   type BreakTypeId,
   type ConversationId,
@@ -20,6 +21,7 @@ import type {
   Job,
   ManualBreaksConfig,
   PostChatMessageInput,
+  TimeClock,
   TimestampWithTimezone,
 } from "./types.js";
 
@@ -180,6 +182,25 @@ export class ConnecteamClient {
       offset += JOBS_PAGE_LIMIT;
     }
     return results;
+  }
+
+  /**
+   * Confirmed via developer.connecteam.com (2026-09-25): GET /time-clock/v1/time-clocks.
+   * No pagination documented — the whole account's Time Clocks return in one array.
+   * Exists because Time Clock IDs aren't visible anywhere in Connecteam's own web UI,
+   * so `importer setup` and the wizard both need this to offer a picker by name
+   * instead of asking the Admin to type a raw ID they have no way to find.
+   */
+  async listTimeClocks(): Promise<TimeClock[]> {
+    const page = await this.request<{ timeClocks: Array<{ id: number; name: string; isArchived: boolean }> }>(
+      "GET",
+      "/time-clock/v1/time-clocks",
+    );
+    return (page.timeClocks ?? []).map((tc) => ({
+      timeClockId: asTimeClockId(String(tc.id)),
+      name: tc.name,
+      isArchived: tc.isArchived,
+    }));
   }
 
   /** Confirmed: GET /time-clock/v1/time-clocks/{timeClockId}/manual-breaks (issue 08). */
