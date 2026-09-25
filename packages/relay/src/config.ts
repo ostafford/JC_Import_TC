@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 export interface SmtpConfig {
   host: string;
@@ -56,7 +57,11 @@ export function loadRelayConfig(): RelayConfig {
   return {
     port: Number(process.env.PORT ?? 8788),
     baseUrl,
-    dataPath: process.env.RELAY_DATA_PATH ?? "./relay.data.json",
+    // Resolved to an absolute path (relative to the process's cwd at startup)
+    // so two instances started from different working directories, or one
+    // started from a different directory than usual, don't silently collide
+    // on what looks like "the same" relative path (issue 1).
+    dataPath: resolve(process.env.RELAY_DATA_PATH ?? "./relay.data.json"),
     magicLinkTtlMs: 15 * 60 * 1000,
     sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
     smtp,

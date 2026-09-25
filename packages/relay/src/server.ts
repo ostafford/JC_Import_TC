@@ -9,7 +9,14 @@ import { handleConnecteamWebhook } from "./webhookReceiver.js";
 import { handleWizardBootstrap } from "./wizardBootstrap.js";
 
 export function startServer(config: RelayConfig): void {
-  const store = new RelayStore(config.dataPath);
+  console.log(`Relay data file: ${config.dataPath}`);
+  let store: RelayStore;
+  try {
+    store = new RelayStore(config.dataPath);
+  } catch (err) {
+    console.error((err as Error).message);
+    process.exit(1);
+  }
   const mailer = createMailer(config);
 
   const server = createServer((req, res) => {

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 import { asConversationId, type ConversationId } from "@sch-import/shared";
 
@@ -41,9 +41,64 @@ function emptyState(): PersistedState {
  */
 export class RelayStore {
   private state: PersistedState;
+  private readonly lockPath: string;
+  private lockFd: number | undefined;
 
+  /**
+   * Guards against two RelayStore instances (e.g. two Relay processes
+   * accidentally sharing a working directory — issue 1) silently
+   * clobbering each other's writes with no warning. Takes an O_EXCL lock
+   * file next to `path` at startup and refuses to start if one's already
+   * held; releases it on normal process exit.
+   */
   constructor(private readonly path: string) {
+    this.lockPath = `${path}.lock`;
+    this.acquireLock();
     this.state = this.load();
+  }
+
+  private acquireLock(): void {
+    mkdirSync(dirname(this.path), { recursive: true });
+    try {
+      this.lockFd = openSync(this.lockPath, "wx");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        const holder = existsSync(this.lockPath) ? readFileSync(this.lockPath, "utf8").trim() : "unknown";
+        throw new Error(
+          `Relay data file ${this.path} is already locked (${this.lockPath}, held by pid ${holder}). ` +
+            `Another Relay instance may already be using this path — check RELAY_DATA_PATH before starting a ` +
+            `second instance. If that process is no longer running, delete ${this.lockPath} and retry.`,
+        );
+      }
+      throw err;
+    }
+    writeSync(this.lockFd, String(process.pid));
+
+    const release = (): void => this.releaseLock();
+    process.once("exit", release);
+    process.once("SIGINT", () => {
+      release();
+      process.exit(0);
+    });
+    process.once("SIGTERM", () => {
+      release();
+      process.exit(0);
+    });
+  }
+
+  private releaseLock(): void {
+    if (this.lockFd === undefined) return;
+    try {
+      closeSync(this.lockFd);
+    } catch {
+      // already closed — fine
+    }
+    this.lockFd = undefined;
+    try {
+      unlinkSync(this.lockPath);
+    } catch {
+      // already removed — fine
+    }
   }
 
   private load(): PersistedState {
