@@ -9,6 +9,14 @@
 
   "observability": { "enabled": true },
 
+  // Cost safety valve, not a functional requirement: this Worker's real CPU
+  // work (parsing the Schedule Export, building each write's request body,
+  // signing) should stay well under this even for a large export — waiting
+  // on the many Connecteam API calls doesn't count against CPU time at all.
+  // Caps how much a single Import Run can cost if a future bug loops or
+  // hangs, independent of Cloudflare's own default (issue 19).
+  "limits": { "cpu_ms": 10000 },
+
   // The `fetch` handler only validates + enqueues; `queue` does the actual
   // Import Run — a Queue consumer isn't bound by the ~30s cap an HTTP
   // response cycle imposes (issue 14/15's fact-check: up to 15 min/invocation).

@@ -11,6 +11,12 @@
   // issue 14's design), not a same-account Worker pinned via a Service Binding.
   "compatibility_flags": ["global_fetch_strictly_public"],
 
+  // Cost safety valve, not a functional requirement: caps CPU time per
+  // invocation well above what this Worker's actual work needs (parse a
+  // small JSON body, one HMAC sign, a couple of DO calls), so a future bug
+  // (an infinite loop, say) can't run up an unexpectedly large bill.
+  "limits": { "cpu_ms": 500 },
+
   // One Durable Object instance per deployment (issue 14: no multi-tenancy
   // to shard within a single company's own self-hosted Relay — ADR 0001).
   "durable_objects": {
