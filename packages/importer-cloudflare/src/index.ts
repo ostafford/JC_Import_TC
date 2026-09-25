@@ -1,4 +1,4 @@
-import { sendImportAbortedToChat, sendImportResultToChat } from "./chatConfirmation.js";
+import { sendImportAbortedToChat, sendImportCrashedToChat, sendImportResultToChat } from "./chatConfirmation.js";
 import { ConnecteamAuthError, ConnecteamClient } from "./connecteamClient.js";
 import { hmacSha256Hex, timingSafeEqualStr } from "./crypto.js";
 import { runImportRun } from "./importRun.js";
@@ -90,11 +90,15 @@ export default {
   /**
    * One message per Import Run trigger (`max_batch_size: 1` in
    * wrangler.jsonc) — deliberately not batched, so one trigger's processing
-   * can't be entangled with another's. A thrown error here is a genuinely
-   * unexpected failure (not a per-row one — those are caught inside
-   * `runImportRun` per issue 04) and triggers Cloudflare's own message
-   * retry; `ConnecteamAuthError` is handled explicitly below so a bad token
-   * doesn't get retried pointlessly.
+   * can't be entangled with another's.
+   *
+   * No automatic retry (`max_retries: 0`, issue 18, discovered live
+   * 2026-09-25): a crash partway through can mean some rows already wrote
+   * real Time Activities, and this pipeline has no way to know which on a
+   * second attempt — a blind retry duplicates writes instead of fixing
+   * anything. `processTrigger` always tries to notify Chat before this
+   * catch ever runs, so this is a last-resort log only, not the Admin's
+   * notice.
    */
   async queue(batch: MessageBatch<RelayTriggerPayload>, env: Env): Promise<void> {
     for (const message of batch.messages) {
@@ -102,8 +106,8 @@ export default {
         await processTrigger(env, message.body);
         message.ack();
       } catch (err) {
-        console.error("Import Run crashed:", err);
-        message.retry();
+        console.error("Import Run crashed (no retry — see Chat for the Admin-facing notice):", err);
+        message.ack(); // never retry a partially-completed, non-idempotent write
       }
     }
   },
@@ -114,10 +118,10 @@ async function processTrigger(env: Env, payload: RelayTriggerPayload): Promise<v
   const config = configFromEnv(env);
   const chatConfig = { conversationId: config.conversationId, senderId: config.senderId };
 
-  const fileContent = await client.downloadAttachment(payload.attachmentUrl);
-  const rows = await parseScheduleExport(fileContent);
-
   try {
+    const fileContent = await client.downloadAttachment(payload.attachmentUrl);
+    const rows = await parseScheduleExport(fileContent);
+
     const outcome = await runImportRun(client, rows, {
       timeClockId: config.timeClockId,
       manualBreaksEnabled: config.manualBreaksEnabled,
@@ -133,6 +137,12 @@ async function processTrigger(env: Env, payload: RelayTriggerPayload): Promise<v
       await sendImportAbortedToChat(client, chatConfig, err.message);
       return;
     }
+
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error("Import Run crashed before completing:", err);
+    await sendImportCrashedToChat(client, chatConfig, detail).catch((notifyErr) =>
+      console.error("Also failed to notify Chat about the crash:", notifyErr),
+    );
     throw err;
   }
 }

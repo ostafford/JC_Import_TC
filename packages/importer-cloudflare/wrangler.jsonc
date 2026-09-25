@@ -13,19 +13,28 @@
   // Import Run — a Queue consumer isn't bound by the ~30s cap an HTTP
   // response cycle imposes (issue 14/15's fact-check: up to 15 min/invocation).
   // Create the queue once before first deploy: `wrangler queues create sch-import-triggers`.
+  //
+  // max_retries: 0 is deliberate, not a placeholder (issue 18, discovered
+  // live 2026-09-25): an Import Run's writes aren't idempotent — a retry
+  // re-runs every row from scratch with no way to know which already
+  // succeeded, so an automatic retry after a partial failure duplicates real
+  // Time Activities instead of fixing anything. A failed run must surface to
+  // the Admin (see chatConfirmation's crash-notice), never retry blind.
   "queues": {
     "producers": [{ "queue": "sch-import-triggers", "binding": "IMPORT_QUEUE" }],
-    "consumers": [{ "queue": "sch-import-triggers", "max_batch_size": 1, "max_retries": 3 }]
+    "consumers": [{ "queue": "sch-import-triggers", "max_batch_size": 1, "max_retries": 0 }]
   },
 
   // Secrets (never in this file — `wrangler secret put <NAME>`):
   //   CONNECTEAM_API_TOKEN, WEBHOOK_SHARED_SECRET
   // Vars (plain config, set below or via `wrangler deploy --var`):
   "vars": {
-    "CONVERSATION_ID": "",
-    "TIME_CLOCK_ID": "",
-    "SENDER_ID": "",
-    "MANUAL_BREAKS_ENABLED": "false"
-    // Optional: CONNECTEAM_BASE_URL, UNPAID_BREAK_TYPE_ID, PAID_BREAK_TYPE_ID
+    "CONVERSATION_ID": "6eb46edd-47b5-4cf2-bcbb-b18fdf5ac694",
+    "TIME_CLOCK_ID": "19481537",
+    "SENDER_ID": "2480518",
+    "MANUAL_BREAKS_ENABLED": "true",
+    "UNPAID_BREAK_TYPE_ID": "a9618ea2-4b1e-4408-ae1a-821418aa909b",
+    "PAID_BREAK_TYPE_ID": "0531a675-0753-4a24-f461-41e1bc5693ae"
+    // Optional: CONNECTEAM_BASE_URL
   }
 }

@@ -73,10 +73,24 @@ export async function runSetup(): Promise<void> {
       }),
     );
 
-    console.log("\nSetup complete — importer.config.json written.\n");
-    console.log("Add this to the Importer's own .env (never commit it):");
-    console.log(`  WEBHOOK_SHARED_SECRET=${webhookSharedSecret}\n`);
-    console.log("Paste these into the Relay's Chat Link form:");
+    console.log("\nSetup complete — importer.config.json written with:");
+    console.log(`  conversationId:      ${chosen.conversationId}`);
+    console.log(`  timeClockId:         ${timeClockId}`);
+    console.log(`  senderId:            ${senderId}`);
+    console.log(`  manualBreaksEnabled: ${breaksConfig.areManualBreaksEnabled}`);
+    if (unpaidBreakTypeId) console.log(`  unpaidBreakTypeId:   ${unpaidBreakTypeId}`);
+    if (paidBreakTypeId) console.log(`  paidBreakTypeId:     ${paidBreakTypeId}`);
+
+    console.log("\nIf running the Importer locally: add this to its .env (never commit it):");
+    console.log(`  WEBHOOK_SHARED_SECRET=${webhookSharedSecret}`);
+
+    console.log(
+      "\nIf deploying the Importer to Cloudflare instead: every value printed above becomes a Worker var, " +
+        "and WEBHOOK_SHARED_SECRET (plus your Connecteam API token) becomes a Worker secret — see README.md's " +
+        '"Deploying to Cloudflare" section for exactly where each one goes.',
+    );
+
+    console.log("\nEither way, paste these into the Relay's Chat Link form:");
     console.log(`  Conversation ID:          ${chosen.conversationId}`);
     console.log("  Importer endpoint URL:    <this Importer's own public webhook URL>");
     console.log(`  Shared secret:            ${webhookSharedSecret}`);

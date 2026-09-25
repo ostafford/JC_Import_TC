@@ -57,6 +57,24 @@ export async function sendImportAbortedToChat(client: ConnecteamClient, config: 
   });
 }
 
+/**
+ * For any other uncaught failure (issue 18, discovered live 2026-09-25):
+ * silence here is worse than everywhere else this tool posts to Chat,
+ * because a crash mid-run may have already written some real shifts before
+ * failing — and this Importer never retries automatically (writes aren't
+ * idempotent), so nothing will fix itself. The Admin must know to check.
+ */
+export async function sendImportCrashedToChat(client: ConnecteamClient, config: ChatConfirmationConfig, detail: string): Promise<void> {
+  await client.postChatMessage({
+    conversationId: config.conversationId,
+    senderId: config.senderId,
+    text: truncate(
+      `❌ Import Run failed before finishing (${detail}). Some shifts from this export may already be written — check today's Time Clock entries for duplicates before re-uploading. This will not retry automatically.`,
+      TEXT_CHAR_BUDGET,
+    ),
+  });
+}
+
 function summaryText(outcome: ImportRunOutcome): string {
   const skippedParts = Object.entries(outcome.skippedByReason)
     .filter(([, count]) => count > 0)

@@ -39,7 +39,10 @@ export async function handleConnecteamWebhook(
   }
 
   const chatLink = await stub.getChatLink();
-  if (!chatLink) return new Response(null, { status: 200 });
+  if (!chatLink) {
+    console.warn("[relay] Connecteam webhook call received, but no Chat Link is saved yet — dropped");
+    return new Response(null, { status: 200 });
+  }
 
   if (!secretHeader || !timingSafeEqualStr(secretHeader, chatLink.connecteamWebhookSecret)) {
     console.warn("[relay] Connecteam webhook call with missing/invalid x-webhook-secret — dropped");
@@ -47,11 +50,24 @@ export async function handleConnecteamWebhook(
   }
 
   const parsed = parseMessageCreatedEvent(event);
-  if (parsed && parsed.conversationId === chatLink.conversationId) {
-    ctx.waitUntil(
-      forwardTrigger(chatLink, parsed).catch((err) => console.error("Failed to forward trigger to Importer:", err)),
-    );
+  if (!parsed) {
+    console.log("[relay] Webhook call ignored (not a real user's file-upload message):", summarizeEvent(event));
+    return new Response(null, { status: 200 });
   }
+
+  if (parsed.conversationId !== chatLink.conversationId) {
+    console.warn(
+      `[relay] Webhook call for conversation ${parsed.conversationId}, but this Relay is linked to ${chatLink.conversationId} — dropped`,
+    );
+    return new Response(null, { status: 200 });
+  }
+
+  console.log(`[relay] Forwarding trigger to Importer for message ${parsed.messageId}`);
+  ctx.waitUntil(
+    forwardTrigger(chatLink, parsed)
+      .then(() => console.log("[relay] Importer accepted the trigger"))
+      .catch((err) => console.error("[relay] Failed to forward trigger to Importer:", err)),
+  );
 
   return new Response(null, { status: 200 });
 }
@@ -68,6 +84,7 @@ async function forwardTrigger(chatLink: ChatLink, payload: RelayTriggerPayload):
   const body = JSON.stringify(payload);
   const signature = await hmacSha256Hex(chatLink.sharedSecret, body);
 
+  console.log(`[relay] Calling Importer at: ${JSON.stringify(chatLink.importerEndpointUrl)}`);
   const res = await fetch(chatLink.importerEndpointUrl, {
     method: "POST",
     headers: {
@@ -111,4 +128,18 @@ function parseMessageCreatedEvent(event: unknown): RelayTriggerPayload | undefin
   if (typeof attachmentUrl !== "string") return undefined;
 
   return { conversationId, messageId, attachmentUrl };
+}
+
+/** A compact, non-sensitive shape summary for the "why was this ignored?" log line — never the raw event body. */
+function summarizeEvent(event: unknown): Record<string, unknown> {
+  if (typeof event !== "object" || event === null) return { shape: "not an object" };
+  const envelope = event as Record<string, unknown>;
+  const message = (envelope.data as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined;
+  return {
+    eventType: envelope.eventType,
+    hasMessage: message !== undefined,
+    isSystem: message?.isSystem,
+    senderType: message?.senderType,
+    attachmentCount: Array.isArray(message?.attachments) ? (message!.attachments as unknown[]).length : 0,
+  };
 }

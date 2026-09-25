@@ -3,6 +3,13 @@
   "name": "sch-import-relay",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-25",
+  // Without this, fetch() to another Worker's own *.workers.dev URL gets
+  // routed as same-zone traffic and 404s (Cloudflare error 1042) — only an
+  // external client reaches it normally. This forces every fetch() to route
+  // as genuine public-internet traffic, matching the Importer's endpoint
+  // being an arbitrary configurable URL (local, Cloudflare, any account —
+  // issue 14's design), not a same-account Worker pinned via a Service Binding.
+  "compatibility_flags": ["global_fetch_strictly_public"],
 
   // One Durable Object instance per deployment (issue 14: no multi-tenancy
   // to shard within a single company's own self-hosted Relay — ADR 0001).
