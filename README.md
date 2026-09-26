@@ -137,6 +137,8 @@ Either way, run `npm run importer -- setup` first (if you haven't already) again
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ostafford/JS_Import_TC/tree/main/packages/importer-cloudflare)
 
+> **Known issue (2026-09-26)**: this button can fail with "Invalid repository URL — Monorepos are not yet fully supported" on Cloudflare's side, for a monorepo-subdirectory URL like this one — not something fixable from this repo. If you hit that, use **Manually (CLI)** below instead; it's fully working and verified.
+
 This also creates the queue the Importer depends on automatically — Cloudflare's button provisions Queues (and Durable Objects, KV, D1, R2, etc.) declared in the repo's Wrangler config, the same as a manual `wrangler queues create` would. Once it's deployed, set the config entirely through the dashboard, no CLI: open this Worker at **Workers & Pages → (your Worker) → Settings → Variables and Secrets → Add**, and add:
 - **Secrets**: `CONNECTEAM_API_TOKEN`, `WEBHOOK_SHARED_SECRET` (from `importer setup`'s output)
 - **Plain vars**: `CONVERSATION_ID`, `SENDER_ID`, and `TIME_CLOCKS_JSON` — one JSON-encoded array, one object per configured Time Clock (`timeClockId`, `name`, `manualBreaksEnabled`, `unpaidBreakTypeId`/`paidBreakTypeId` where enabled). `importer setup` doesn't print this exact string — build it from `importer.config.json`, e.g. `node -e "console.log(JSON.stringify(require('./importer.config.json').timeClocks))"` run from `packages/importer`
