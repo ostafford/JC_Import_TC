@@ -1,31 +1,39 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { escapeHtml, page, parseFormBody } from "@sch-import/relay/dist/lib.js";
+import { advanceTimeClockQueue } from "../timeClockQueue.js";
 import type { WizardState } from "../wizardState.js";
 
 /**
  * Time Clock IDs aren't visible anywhere in Connecteam's own web UI
- * (discovered live, 2026-09-25 — not anticipated by any prior ticket), so
- * this picks from a fetched list by name, the same way the conversation
- * step does, instead of asking for a raw ID nobody could ever find.
+ * (discovered live, 2026-09-25), so this picks from a fetched list by name,
+ * the same way the conversation step does, instead of asking for a raw ID
+ * nobody could ever find.
+ *
+ * Multi-select (multi-time-clock-routing map, Phase 2): each checkbox gets
+ * its own field name (`timeClock_<index>`) rather than sharing one name —
+ * `parseFormBody` (a plain `URLSearchParams` walk, shared with the Relay)
+ * only keeps the last value for a repeated key, so a single shared
+ * `name="timeClockIndex"` across checkboxes would silently drop every
+ * selection but one.
  */
 export function renderTimeClockStep(state: WizardState, error?: string): string {
   const timeClocks = state.timeClocks ?? [];
   const options = timeClocks
     .map(
       (tc, i) =>
-        `<label class="radio"><input type="radio" name="timeClockIndex" value="${i}" ${i === 0 ? "checked" : ""}> ${escapeHtml(
-          tc.name,
-        )}${tc.isArchived ? " (archived)" : ""}</label>`,
+        `<label class="checkbox"><input type="checkbox" name="timeClock_${i}" value="on" ${
+          i === 0 ? "checked" : ""
+        }> ${escapeHtml(tc.name)}${tc.isArchived ? " (archived)" : ""}</label>`,
     )
     .join("\n");
 
   return page(
-    "Setup — Time Clock",
-    `<h1>Step 4 of 6 — Time Clock and chat sender</h1>
+    "Setup — Time Clocks",
+    `<h1>Step 4 of 6 — Time Clocks and chat sender</h1>
 ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 <form method="post" action="/step/time-clock">
-  <h2>Time Clock</h2>
-  <p class="hint">Used for writing Time Activities and reading manual-break configuration.</p>
+  <h2>Time Clocks</h2>
+  <p class="hint">Pick every Time Clock this Importer should route Import Runs across.</p>
   ${options}
 
   <label for="senderId">Custom Publisher ID</label>
@@ -41,29 +49,28 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 export async function handleTimeClockStep(req: IncomingMessage, res: ServerResponse, state: WizardState): Promise<void> {
   const timeClocks = state.timeClocks ?? [];
   const form = await parseFormBody(req);
-  const chosen = timeClocks[Number(form.timeClockIndex)];
+  const chosen = timeClocks.filter((_, i) => form[`timeClock_${i}`] === "on");
   const senderId = form.senderId?.trim();
 
-  if (!chosen || !senderId) {
+  if (chosen.length === 0 || !senderId) {
     res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(renderTimeClockStep(state, "Pick a Time Clock and enter the Custom Publisher ID."));
+    res.end(renderTimeClockStep(state, "Pick at least one Time Clock and enter the Custom Publisher ID."));
     return;
   }
 
-  let breaksConfig;
+  state.timeClockQueue = chosen;
+  state.timeClockResults = [];
+  state.senderId = senderId;
+
+  let result;
   try {
-    breaksConfig = await state.client!.getManualBreaksConfig(chosen.timeClockId);
+    result = await advanceTimeClockQueue(state.client!, state);
   } catch {
     res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(renderTimeClockStep(state, "Couldn't read manual-break configuration for that Time Clock."));
+    res.end(renderTimeClockStep(state, "Couldn't read manual-break configuration for one of those Time Clocks."));
     return;
   }
 
-  state.timeClockId = chosen.timeClockId;
-  state.timeClockName = chosen.name;
-  state.senderId = senderId;
-  state.breaksConfig = breaksConfig;
-
-  res.writeHead(302, { Location: breaksConfig.areManualBreaksEnabled ? "/step/break-types" : "/step/relay-link" });
+  res.writeHead(302, { Location: result === "needs-break-picker" ? "/step/break-types" : "/step/relay-link" });
   res.end();
 }

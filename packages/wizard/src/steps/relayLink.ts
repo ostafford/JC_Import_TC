@@ -46,15 +46,7 @@ export async function handleRelayLinkStep(
     buildPersistedConfig({
       conversationId: state.conversationId!,
       senderId: state.senderId!,
-      timeClocks: [
-        {
-          timeClockId: state.timeClockId!,
-          name: state.timeClockName!,
-          manualBreaksEnabled: state.breaksConfig!.areManualBreaksEnabled,
-          unpaidBreakTypeId: state.unpaidBreakTypeId,
-          paidBreakTypeId: state.paidBreakTypeId,
-        },
-      ],
+      timeClocks: state.timeClockResults!,
     }),
     importerConfigPath,
   );

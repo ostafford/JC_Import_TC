@@ -89,25 +89,25 @@ async function route(req: IncomingMessage, res: ServerResponse, config: WizardCo
   }
 
   if (method === "GET" && url.pathname === "/step/break-types") {
-    if (!state.breaksConfig) return redirectTo(res, "/step/time-clock");
+    if (!state.currentTimeClock) return redirectTo(res, "/step/time-clock");
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(renderBreakTypesStep(state));
     return;
   }
   if (method === "POST" && url.pathname === "/step/break-types") {
-    if (!state.breaksConfig) return redirectTo(res, "/step/time-clock");
+    if (!state.currentTimeClock) return redirectTo(res, "/step/time-clock");
     await handleBreakTypesStep(req, res, state);
     return;
   }
 
   if (method === "GET" && url.pathname === "/step/relay-link") {
-    if (!state.timeClockId) return redirectTo(res, "/step/time-clock");
+    if (!state.timeClockResults || state.timeClockResults.length === 0) return redirectTo(res, "/step/time-clock");
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(renderRelayLinkStep());
     return;
   }
   if (method === "POST" && url.pathname === "/step/relay-link") {
-    if (!state.timeClockId) return redirectTo(res, "/step/time-clock");
+    if (!state.timeClockResults || state.timeClockResults.length === 0) return redirectTo(res, "/step/time-clock");
     await handleRelayLinkStep(req, res, state, config);
     return;
   }
