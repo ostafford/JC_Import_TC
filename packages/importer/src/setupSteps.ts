@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { ManualBreakType } from "@sch-import/shared";
-import type { PersistedSetupConfig } from "./config.js";
+import type { PersistedSetupConfig, TimeClockSetupEntry } from "./config.js";
 
 /**
  * The business logic behind `importer setup` (issue 06/08), pulled out of
@@ -23,11 +23,8 @@ export function validateBreakTypeSelection(types: ManualBreakType[], chosenId: s
 
 export function buildPersistedConfig(input: {
   conversationId: string;
-  timeClockId: string;
   senderId: string;
-  manualBreaksEnabled: boolean;
-  unpaidBreakTypeId?: string;
-  paidBreakTypeId?: string;
+  timeClocks: TimeClockSetupEntry[];
 }): PersistedSetupConfig {
   return { ...input };
 }

@@ -34,7 +34,7 @@ const baseConfig = { timeClockId: asTimeClockId("tc1"), manualBreaksEnabled: fal
 test("matched employee, no existing entry -> success", async () => {
   const client: ImportWriter = {
     async listJobsByTitles() {
-      return [{ jobId: asJobId("job-chef"), title: "Chef" }];
+      return [{ jobId: asJobId("job-chef"), title: "Chef", instanceIds: [] }];
     },
     async listUsersByFullNames() {
       return [{ userId: asUserId("u1"), firstName: "Jack", lastName: "Mitchell", isArchived: false }];
@@ -55,7 +55,7 @@ test("matched employee, no existing entry -> success", async () => {
 test("row already has a real entry -> skipped, no write attempted", async () => {
   const client: ImportWriter = {
     async listJobsByTitles() {
-      return [{ jobId: asJobId("job-chef"), title: "Chef" }];
+      return [{ jobId: asJobId("job-chef"), title: "Chef", instanceIds: [] }];
     },
     async listUsersByFullNames() {
       return [{ userId: asUserId("u1"), firstName: "Jack", lastName: "Mitchell", isArchived: false }];
@@ -76,7 +76,7 @@ test("row already has a real entry -> skipped, no write attempted", async () => 
 test("unmatched employee -> skipped, run continues", async () => {
   const client: ImportWriter = {
     async listJobsByTitles() {
-      return [{ jobId: asJobId("job-chef"), title: "Chef" }];
+      return [{ jobId: asJobId("job-chef"), title: "Chef", instanceIds: [] }];
     },
     async listUsersByFullNames() {
       return [];
@@ -141,7 +141,7 @@ test("one row's write fails with a locked-day-shaped 422, the rest still run", a
   let calls = 0;
   const client: ImportWriter = {
     async listJobsByTitles() {
-      return [{ jobId: asJobId("job-chef"), title: "Chef" }];
+      return [{ jobId: asJobId("job-chef"), title: "Chef", instanceIds: [] }];
     },
     async listUsersByFullNames() {
       return [{ userId: asUserId("u1"), firstName: "Jack", lastName: "Mitchell", isArchived: false }];
@@ -164,7 +164,7 @@ test("one row's write fails with a locked-day-shaped 422, the rest still run", a
 test("a systemic auth error aborts the whole run instead of being caught per-row", async () => {
   const client: ImportWriter = {
     async listJobsByTitles() {
-      return [{ jobId: asJobId("job-chef"), title: "Chef" }];
+      return [{ jobId: asJobId("job-chef"), title: "Chef", instanceIds: [] }];
     },
     async listUsersByFullNames() {
       return [{ userId: asUserId("u1"), firstName: "Jack", lastName: "Mitchell", isArchived: false }];
@@ -184,7 +184,7 @@ test("manual breaks: writes unpaid + paid breaks as a contiguous block placed wi
   const writtenBreaks: Array<{ breakTypeId: string; start: Date; end: Date }> = [];
   const client: ImportWriter = {
     async listJobsByTitles() {
-      return [{ jobId: asJobId("job-chef"), title: "Chef" }];
+      return [{ jobId: asJobId("job-chef"), title: "Chef", instanceIds: [] }];
     },
     async listUsersByFullNames() {
       return [{ userId: asUserId("u1"), firstName: "Jack", lastName: "Mitchell", isArchived: false }];

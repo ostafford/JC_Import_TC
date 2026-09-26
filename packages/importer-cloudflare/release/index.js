@@ -24657,20 +24657,41 @@ var ConnecteamClient = class {
   async listJobsByTitles(titles, instanceId) {
     if (titles.length === 0)
       return [];
+    return this.listJobsByTitlesQuery(titles, [String(instanceId)]);
+  }
+  /**
+   * Same query, minus the `instanceIds` filter — added for multi-Time-Clock
+   * routing (issue 01 of the multi-time-clock-routing map). Confirmed live:
+   * querying by name alone still returns each Job's own real `instanceIds`,
+   * which is enough to tell which Time Clock a Job belongs to without
+   * knowing it up front. Only meaningful when more than one Time Clock is
+   * configured — the common single-Time-Clock case keeps using the scoped
+   * `listJobsByTitles` above, unchanged.
+   */
+  async listJobsAcrossTimeClocksByTitles(titles) {
+    if (titles.length === 0)
+      return [];
+    return this.listJobsByTitlesQuery(titles);
+  }
+  async listJobsByTitlesQuery(titles, instanceIds) {
     const results = [];
     let offset = 0;
     for (; ; ) {
       const page = await this.request("GET", "/jobs/v1/jobs", {
         query: {
           jobNames: titles,
-          instanceIds: [String(instanceId)],
+          instanceIds,
           includeDeleted: "false",
           limit: JOBS_PAGE_LIMIT,
           offset
         }
       });
       const jobs = page.jobs ?? [];
-      results.push(...jobs.map((j) => ({ jobId: asJobId(j.jobId), title: j.title })));
+      results.push(...jobs.map((j) => ({
+        jobId: asJobId(j.jobId),
+        title: j.title,
+        instanceIds: (j.instanceIds ?? []).map((id) => asTimeClockId(String(id)))
+      })));
       if (jobs.length < JOBS_PAGE_LIMIT)
         break;
       offset += JOBS_PAGE_LIMIT;
@@ -25246,15 +25267,62 @@ function isLockedDayError(err) {
 }
 __name(isLockedDayError, "isLockedDayError");
 
+// ../shared/dist/timeClockResolution.js
+async function resolveTimeClockForRun(client, resourceTitles, configuredTimeClocks, caption) {
+  const viaJobs = await resolveViaJobs(client, resourceTitles, configuredTimeClocks);
+  const viaCaption = resolveViaCaption(caption, configuredTimeClocks);
+  if (viaJobs && viaCaption && viaJobs !== viaCaption) {
+    return { kind: "conflict", jobResolvedTimeClockId: viaJobs, captionResolvedTimeClockId: viaCaption };
+  }
+  if (viaJobs)
+    return { kind: "resolved", timeClockId: viaJobs };
+  if (viaCaption)
+    return { kind: "resolved", timeClockId: viaCaption };
+  return { kind: "unresolved" };
+}
+__name(resolveTimeClockForRun, "resolveTimeClockForRun");
+async function resolveViaJobs(client, resourceTitles, configuredTimeClocks) {
+  const distinct = Array.from(new Set(resourceTitles.map((r) => r.trim()).filter((r) => r.length > 0)));
+  if (distinct.length === 0)
+    return void 0;
+  const configuredIds = new Set(configuredTimeClocks.map((tc) => tc.timeClockId));
+  const jobs = await client.listJobsAcrossTimeClocksByTitles(distinct);
+  const matchedJobs = jobs.filter((j) => distinct.includes(j.title));
+  if (matchedJobs.length === 0)
+    return void 0;
+  let candidates;
+  for (const job of matchedJobs) {
+    const jobCandidates = new Set(job.instanceIds.filter((id) => configuredIds.has(id)));
+    candidates = candidates === void 0 ? jobCandidates : intersect(candidates, jobCandidates);
+  }
+  if (candidates === void 0 || candidates.size !== 1)
+    return void 0;
+  return [...candidates][0];
+}
+__name(resolveViaJobs, "resolveViaJobs");
+function resolveViaCaption(caption, configuredTimeClocks) {
+  const normalized = caption?.trim().toLowerCase();
+  if (!normalized)
+    return void 0;
+  const matches = configuredTimeClocks.filter((tc) => normalized.includes(tc.name.trim().toLowerCase()));
+  return matches.length === 1 ? matches[0].timeClockId : void 0;
+}
+__name(resolveViaCaption, "resolveViaCaption");
+function intersect(a, b) {
+  return new Set([...a].filter((x) => b.has(x)));
+}
+__name(intersect, "intersect");
+
 // ../shared/dist/chatConfirmation.js
 var TEXT_CHAR_BUDGET = 480;
-async function sendImportResultToChat(client, config, outcome) {
+async function sendImportResultToChat(client, config, outcome, timeClockName) {
   const totalSkipped = outcome.totalRows - outcome.succeeded;
+  const targetSuffix = timeClockName ? ` into ${timeClockName}` : "";
   if (totalSkipped === 0) {
     await client.postChatMessage({
       conversationId: config.conversationId,
       senderId: config.senderId,
-      text: `\u2705 Imported ${outcome.succeeded} shift${outcome.succeeded === 1 ? "" : "s"} from your schedule export.`
+      text: `\u2705 Imported ${outcome.succeeded} shift${outcome.succeeded === 1 ? "" : "s"}${targetSuffix} from your schedule export.`
     });
     return;
   }
@@ -25263,11 +25331,27 @@ async function sendImportResultToChat(client, config, outcome) {
   await client.postChatMessage({
     conversationId: config.conversationId,
     senderId: config.senderId,
-    text: truncate(summaryText(outcome), TEXT_CHAR_BUDGET),
+    text: truncate(summaryText(outcome, targetSuffix), TEXT_CHAR_BUDGET),
     attachments: [{ type: "file", fileId }]
   });
 }
 __name(sendImportResultToChat, "sendImportResultToChat");
+async function sendTimeClockUnresolvedToChat(client, config, timeClockNames) {
+  await client.postChatMessage({
+    conversationId: config.conversationId,
+    senderId: config.senderId,
+    text: truncate(`\u26A0\uFE0F Couldn't tell which Time Clock this schedule belongs to. Re-upload with a caption naming one of: ${timeClockNames.join(", ")}.`, TEXT_CHAR_BUDGET)
+  });
+}
+__name(sendTimeClockUnresolvedToChat, "sendTimeClockUnresolvedToChat");
+async function sendTimeClockConflictToChat(client, config, jobResolvedName, captionResolvedName) {
+  await client.postChatMessage({
+    conversationId: config.conversationId,
+    senderId: config.senderId,
+    text: truncate(`\u26A0\uFE0F This schedule's Jobs point to ${jobResolvedName}, but your caption said ${captionResolvedName} \u2014 nothing was imported. If ${jobResolvedName} is right, re-upload with no caption (or one naming ${jobResolvedName}). If ${captionResolvedName} is right, this schedule's Jobs need to be reassigned to it in Connecteam first.`, TEXT_CHAR_BUDGET)
+  });
+}
+__name(sendTimeClockConflictToChat, "sendTimeClockConflictToChat");
 async function sendImportAbortedToChat(client, config, detail) {
   await client.postChatMessage({
     conversationId: config.conversationId,
@@ -25284,11 +25368,11 @@ async function sendImportCrashedToChat(client, config, detail) {
   });
 }
 __name(sendImportCrashedToChat, "sendImportCrashedToChat");
-function summaryText(outcome) {
+function summaryText(outcome, targetSuffix) {
   const skippedParts = Object.entries(outcome.skippedByReason).filter(([, count]) => count > 0).map(([reason, count]) => `${count} ${humanizeReason(reason)}`);
   const lockedDayNames = outcome.rows.filter((r) => r.reason === "locked-day").map((r) => r.employeeName);
   const lockedDayNote = lockedDayNames.length > 0 ? ` Locked day(s) for: ${Array.from(new Set(lockedDayNames)).join(", ")}.` : "";
-  return `Imported ${outcome.succeeded}/${outcome.totalRows} shifts. Skipped: ${skippedParts.join(", ")}.${lockedDayNote} Full detail attached.`;
+  return `Imported ${outcome.succeeded}/${outcome.totalRows} shifts${targetSuffix}. Skipped: ${skippedParts.join(", ")}.${lockedDayNote} Full detail attached.`;
 }
 __name(summaryText, "summaryText");
 function humanizeReason(reason) {
@@ -25332,9 +25416,33 @@ async function processImportTrigger(client, config, chatConfig, payload) {
   try {
     const fileContent = await client.downloadAttachment(payload.attachmentUrl);
     const rows = await parseScheduleExport(fileContent);
-    const outcome = await runImportRun(client, rows, config);
+    const isMultiTimeClock = config.timeClocks.length > 1;
+    let target;
+    if (!isMultiTimeClock) {
+      target = config.timeClocks[0];
+    } else {
+      const resolution = await resolveTimeClockForRun(client, rows.map((r) => r.resource), config.timeClocks, payload.caption);
+      if (resolution.kind === "unresolved") {
+        await sendTimeClockUnresolvedToChat(client, chatConfig, config.timeClocks.map((tc) => tc.name));
+        return;
+      }
+      if (resolution.kind === "conflict") {
+        const jobResolvedName = config.timeClocks.find((tc) => tc.timeClockId === resolution.jobResolvedTimeClockId).name;
+        const captionResolvedName = config.timeClocks.find((tc) => tc.timeClockId === resolution.captionResolvedTimeClockId).name;
+        await sendTimeClockConflictToChat(client, chatConfig, jobResolvedName, captionResolvedName);
+        return;
+      }
+      target = config.timeClocks.find((tc) => tc.timeClockId === resolution.timeClockId);
+    }
+    const pipelineConfig = {
+      timeClockId: target.timeClockId,
+      manualBreaksEnabled: target.manualBreaksEnabled,
+      unpaidBreakTypeId: target.unpaidBreakTypeId,
+      paidBreakTypeId: target.paidBreakTypeId
+    };
+    const outcome = await runImportRun(client, rows, pipelineConfig);
     console.log("Import Run outcome:", JSON.stringify(outcome));
-    await sendImportResultToChat(client, chatConfig, outcome);
+    await sendImportResultToChat(client, chatConfig, outcome, isMultiTimeClock ? target.name : void 0);
   } catch (err) {
     if (err instanceof ConnecteamAuthError) {
       await sendImportAbortedToChat(client, chatConfig, err.message).catch((notifyErr) => console.error("Also failed to notify Chat about the abort:", notifyErr));
@@ -25371,7 +25479,7 @@ __name(timingSafeEqualStr, "timingSafeEqualStr");
 function parsePayload(bytes) {
   try {
     const json = JSON.parse(new TextDecoder().decode(bytes));
-    if (typeof json?.conversationId === "string" && typeof json?.messageId === "string" && typeof json?.attachmentUrl === "string") {
+    if (typeof json?.conversationId === "string" && typeof json?.messageId === "string" && typeof json?.attachmentUrl === "string" && (json?.caption === void 0 || typeof json.caption === "string")) {
       return json;
     }
     return void 0;
@@ -25420,12 +25528,7 @@ var index_default = {
       const config = configFromEnv(env);
       await processImportTrigger(
         client,
-        {
-          timeClockId: config.timeClockId,
-          manualBreaksEnabled: config.manualBreaksEnabled,
-          unpaidBreakTypeId: config.unpaidBreakTypeId,
-          paidBreakTypeId: config.paidBreakTypeId
-        },
+        { timeClocks: config.timeClocks },
         { conversationId: config.conversationId, senderId: config.senderId },
         message.body
       );
@@ -25445,13 +25548,17 @@ function statusForFailure(reason) {
 }
 __name(statusForFailure, "statusForFailure");
 function configFromEnv(env) {
+  const entries = JSON.parse(env.TIME_CLOCKS_JSON);
   return {
     conversationId: asConversationId(env.CONVERSATION_ID),
-    timeClockId: asTimeClockId(env.TIME_CLOCK_ID),
     senderId: asPublisherId(env.SENDER_ID),
-    manualBreaksEnabled: env.MANUAL_BREAKS_ENABLED === "true",
-    unpaidBreakTypeId: env.UNPAID_BREAK_TYPE_ID ? asBreakTypeId(env.UNPAID_BREAK_TYPE_ID) : void 0,
-    paidBreakTypeId: env.PAID_BREAK_TYPE_ID ? asBreakTypeId(env.PAID_BREAK_TYPE_ID) : void 0
+    timeClocks: entries.map((tc) => ({
+      timeClockId: asTimeClockId(tc.timeClockId),
+      name: tc.name,
+      manualBreaksEnabled: tc.manualBreaksEnabled,
+      unpaidBreakTypeId: tc.unpaidBreakTypeId ? asBreakTypeId(tc.unpaidBreakTypeId) : void 0,
+      paidBreakTypeId: tc.paidBreakTypeId ? asBreakTypeId(tc.paidBreakTypeId) : void 0
+    }))
   };
 }
 __name(configFromEnv, "configFromEnv");

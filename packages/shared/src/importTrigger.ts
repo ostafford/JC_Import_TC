@@ -1,23 +1,47 @@
 import { ConnecteamAuthError, type ConnecteamClient } from "./connecteam/client.js";
 import { parseScheduleExport } from "./scheduleExport.js";
 import { runImportRun, type ImportPipelineConfig, type ImportWriter } from "./importRun.js";
+import { resolveTimeClockForRun, type JobLookup, type TimeClockOption } from "./timeClockResolution.js";
 import {
   sendImportAbortedToChat,
   sendImportCrashedToChat,
   sendImportResultToChat,
+  sendTimeClockConflictToChat,
+  sendTimeClockUnresolvedToChat,
   type ChatConfirmationConfig,
   type ChatSender,
 } from "./chatConfirmation.js";
-import type { ConversationId } from "./vocabulary.js";
+import type { BreakTypeId, ConversationId } from "./vocabulary.js";
 
 /**
  * The Relay's bare trigger, forwarded to an Importer after it sees a
  * Schedule Export uploaded (ADR 0001) — never file content or a token.
+ * `caption` (Connecteam's `data.message.content`) is optional and only ever
+ * used as the multi-Time-Clock fallback signal (multi-time-clock-routing
+ * map, issue 05) — a single-Time-Clock deployment never reads it.
  */
 export interface RelayTriggerPayload {
   conversationId: string;
   messageId: string;
   attachmentUrl: string;
+  caption?: string;
+}
+
+/**
+ * One configured Time Clock this Importer may route an Import Run to.
+ * `name` is used both for the caption fallback match (issue 05) and for
+ * naming the target in Chat confirmations once there's more than one
+ * (issue 04). A single-entry list behaves exactly like the original
+ * single-Time-Clock design — no resolution step runs at all.
+ */
+export interface TimeClockConfig extends TimeClockOption {
+  manualBreaksEnabled: boolean;
+  unpaidBreakTypeId?: BreakTypeId;
+  paidBreakTypeId?: BreakTypeId;
+}
+
+export interface ImportTriggerConfig {
+  timeClocks: TimeClockConfig[];
 }
 
 export type RelayTriggerVerificationFailure = "bad-signature" | "malformed-payload" | "wrong-conversation";
@@ -63,20 +87,21 @@ export async function verifyRelayTrigger(
 }
 
 /** Everything `processImportTrigger` (and the `runImportRun`/Chat-notify calls inside it) needs from a ConnecteamClient. */
-export type ImportTriggerClient = ImportWriter & ChatSender & Pick<ConnecteamClient, "downloadAttachment">;
+export type ImportTriggerClient = ImportWriter & ChatSender & JobLookup & Pick<ConnecteamClient, "downloadAttachment">;
 
 /**
  * Turns one verified Relay trigger into a full Import Run: downloads the
- * Schedule Export, runs it, and always notifies Chat — success, a systemic
- * auth abort, or a crash (ADR 0002: no automatic retry, so the Admin must be
- * told directly). Never rejects: both deployments used to catch this
- * themselves and log an identical last-resort line, so owning that here
- * means neither caller needs a catch — the Cloudflare Queue consumer in
- * particular can always ack without one.
+ * Schedule Export, resolves which configured Time Clock it targets (a no-op
+ * when only one is configured), runs it, and always notifies Chat — success,
+ * an unresolved Time Clock, a systemic auth abort, or a crash (ADR 0002: no
+ * automatic retry, so the Admin must be told directly). Never rejects: both
+ * deployments used to catch this themselves and log an identical last-resort
+ * line, so owning that here means neither caller needs a catch — the
+ * Cloudflare Queue consumer in particular can always ack without one.
  */
 export async function processImportTrigger(
   client: ImportTriggerClient,
-  config: ImportPipelineConfig,
+  config: ImportTriggerConfig,
   chatConfig: ChatConfirmationConfig,
   payload: RelayTriggerPayload,
 ): Promise<void> {
@@ -84,11 +109,48 @@ export async function processImportTrigger(
     const fileContent = await client.downloadAttachment(payload.attachmentUrl);
     const rows = await parseScheduleExport(fileContent);
 
-    const outcome = await runImportRun(client, rows, config);
+    const isMultiTimeClock = config.timeClocks.length > 1;
+    let target: TimeClockConfig;
+    if (!isMultiTimeClock) {
+      target = config.timeClocks[0]!;
+    } else {
+      const resolution = await resolveTimeClockForRun(
+        client,
+        rows.map((r) => r.resource),
+        config.timeClocks,
+        payload.caption,
+      );
+      if (resolution.kind === "unresolved") {
+        await sendTimeClockUnresolvedToChat(
+          client,
+          chatConfig,
+          config.timeClocks.map((tc) => tc.name),
+        );
+        return;
+      }
+      if (resolution.kind === "conflict") {
+        const jobResolvedName = config.timeClocks.find((tc) => tc.timeClockId === resolution.jobResolvedTimeClockId)!.name;
+        const captionResolvedName = config.timeClocks.find(
+          (tc) => tc.timeClockId === resolution.captionResolvedTimeClockId,
+        )!.name;
+        await sendTimeClockConflictToChat(client, chatConfig, jobResolvedName, captionResolvedName);
+        return;
+      }
+      target = config.timeClocks.find((tc) => tc.timeClockId === resolution.timeClockId)!;
+    }
+
+    const pipelineConfig: ImportPipelineConfig = {
+      timeClockId: target.timeClockId,
+      manualBreaksEnabled: target.manualBreaksEnabled,
+      unpaidBreakTypeId: target.unpaidBreakTypeId,
+      paidBreakTypeId: target.paidBreakTypeId,
+    };
+
+    const outcome = await runImportRun(client, rows, pipelineConfig);
     // Logged before the chat post so a downstream failure there (e.g. the
     // attachment upload) doesn't leave this Import Run's outcome unrecoverable.
     console.log("Import Run outcome:", JSON.stringify(outcome));
-    await sendImportResultToChat(client, chatConfig, outcome);
+    await sendImportResultToChat(client, chatConfig, outcome, isMultiTimeClock ? target.name : undefined);
   } catch (err) {
     if (err instanceof ConnecteamAuthError) {
       await sendImportAbortedToChat(client, chatConfig, err.message).catch((notifyErr) =>
@@ -138,7 +200,8 @@ function parsePayload(bytes: Uint8Array): RelayTriggerPayload | undefined {
     if (
       typeof json?.conversationId === "string" &&
       typeof json?.messageId === "string" &&
-      typeof json?.attachmentUrl === "string"
+      typeof json?.attachmentUrl === "string" &&
+      (json?.caption === undefined || typeof json.caption === "string")
     ) {
       return json as RelayTriggerPayload;
     }

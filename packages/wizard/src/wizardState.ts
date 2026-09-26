@@ -19,6 +19,7 @@ export interface WizardState {
   webhookSharedSecret?: string;
   webhookVerified?: boolean;
   timeClockId?: string;
+  timeClockName?: string;
   senderId?: string;
   breaksConfig?: ManualBreaksConfig;
   unpaidBreakTypeId?: string;

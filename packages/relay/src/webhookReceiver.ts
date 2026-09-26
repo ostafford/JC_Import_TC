@@ -92,5 +92,8 @@ function parseMessageCreatedEvent(event: unknown): RelayTriggerPayload | undefin
   const attachmentUrl = firstAttachment?.url;
   if (typeof attachmentUrl !== "string") return undefined;
 
-  return { conversationId, messageId, attachmentUrl };
+  const content = message.content;
+  const caption = typeof content === "string" && content.trim().length > 0 ? content : undefined;
+
+  return { conversationId, messageId, attachmentUrl, caption };
 }

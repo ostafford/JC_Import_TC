@@ -103,8 +103,42 @@ async function buildScheduleExportBuffer(): Promise<Buffer> {
   return (await workbook.xlsx.writeBuffer()) as unknown as Buffer;
 }
 
+async function buildScheduleExportBufferWithResource(resource: string): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Schedule");
+  sheet.addRow([...EXPECTED_HEADERS]);
+  sheet.addRow([
+    "21/09/2026",
+    "09:00am",
+    "05:00pm",
+    "Australia/Melbourne",
+    "",
+    resource,
+    "Jack Mitchell",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+  ]);
+  return (await workbook.xlsx.writeBuffer()) as unknown as Buffer;
+}
+
 const basePayload = { conversationId: "conv-1", messageId: "m1", attachmentUrl: "https://cdn/attachment" };
-const baseConfig = { timeClockId: asTimeClockId("tc1"), manualBreaksEnabled: false };
+const NORTH = { timeClockId: asTimeClockId("tc-north"), name: "North Cafe", manualBreaksEnabled: false };
+const SOUTH = { timeClockId: asTimeClockId("tc-south"), name: "South Cafe", manualBreaksEnabled: false };
+const baseConfig = { timeClocks: [NORTH] };
 const baseChatConfig = { conversationId: EXPECTED_CONVERSATION, senderId: asPublisherId("pub-1") };
 
 function fakeClient(overrides: Partial<ImportTriggerClient> = {}): ImportTriggerClient {
@@ -116,7 +150,10 @@ function fakeClient(overrides: Partial<ImportTriggerClient> = {}): ImportTrigger
       return [{ userId: asUserId("u1"), firstName: "Jack", lastName: "Mitchell", isArchived: false }];
     },
     async listJobsByTitles() {
-      return [{ jobId: asJobId("job-1"), title: "Chef" }];
+      return [{ jobId: asJobId("job-1"), title: "Chef", instanceIds: [] }];
+    },
+    async listJobsAcrossTimeClocksByTitles() {
+      throw new Error("should not be called — single Time Clock configured, resolution is skipped");
     },
     async createShiftTimeActivity() {
       return { timeActivityId: asTimeActivityId("ta1") };
@@ -203,4 +240,118 @@ test("processImportTrigger: crash AND the crash notice itself fails to send -> s
   await processImportTrigger(client, baseConfig, baseChatConfig, basePayload);
 
   assert.equal(postAttempts, 1);
+});
+
+test("processImportTrigger: multi-Time-Clock, resolved via Job -> writes to the resolved clock and names it in Chat", async () => {
+  const posted: Array<{ text: string }> = [];
+  const writtenTo: Array<{ timeClockId: string }> = [];
+  const buffer = await buildScheduleExportBufferWithResource("Chef");
+  const client = fakeClient({
+    async downloadAttachment() {
+      return buffer;
+    },
+    async listJobsAcrossTimeClocksByTitles() {
+      return [{ jobId: asJobId("job-1"), title: "Chef", instanceIds: [SOUTH.timeClockId] }];
+    },
+    async createShiftTimeActivity(input) {
+      writtenTo.push({ timeClockId: input.timeClockId });
+      return { timeActivityId: asTimeActivityId("ta1") };
+    },
+    async postChatMessage(input) {
+      posted.push({ text: input.text ?? "" });
+    },
+  });
+
+  await processImportTrigger(client, { timeClocks: [NORTH, SOUTH] }, baseChatConfig, basePayload);
+
+  assert.deepEqual(writtenTo, [{ timeClockId: SOUTH.timeClockId }]);
+  assert.equal(posted.length, 1);
+  assert.match(posted[0]!.text, /South Cafe/);
+});
+
+test("processImportTrigger: multi-Time-Clock, Job resolution ambiguous but caption resolves it", async () => {
+  const writtenTo: Array<{ timeClockId: string }> = [];
+  const buffer = await buildScheduleExportBufferWithResource("Chef");
+  const client = fakeClient({
+    async downloadAttachment() {
+      return buffer;
+    },
+    async listJobsAcrossTimeClocksByTitles() {
+      // Shared across both configured Time Clocks — Job-based resolution can't narrow to one.
+      return [{ jobId: asJobId("job-1"), title: "Chef", instanceIds: [NORTH.timeClockId, SOUTH.timeClockId] }];
+    },
+    async createShiftTimeActivity(input) {
+      writtenTo.push({ timeClockId: input.timeClockId });
+      return { timeActivityId: asTimeActivityId("ta1") };
+    },
+    async postChatMessage() {},
+  });
+
+  await processImportTrigger(
+    client,
+    { timeClocks: [NORTH, SOUTH] },
+    baseChatConfig,
+    { ...basePayload, caption: "north cafe" },
+  );
+
+  assert.deepEqual(writtenTo, [{ timeClockId: NORTH.timeClockId }]);
+});
+
+test("processImportTrigger: multi-Time-Clock, Job and caption disagree -> conflict, aborts before any write", async () => {
+  const posted: Array<{ text: string }> = [];
+  const writesAttempted: unknown[] = [];
+  const buffer = await buildScheduleExportBufferWithResource("Chef");
+  const client = fakeClient({
+    async downloadAttachment() {
+      return buffer;
+    },
+    async listJobsAcrossTimeClocksByTitles() {
+      return [{ jobId: asJobId("job-1"), title: "Chef", instanceIds: [NORTH.timeClockId] }];
+    },
+    async createShiftTimeActivity(input) {
+      writesAttempted.push(input);
+      return { timeActivityId: asTimeActivityId("ta1") };
+    },
+    async postChatMessage(input) {
+      posted.push({ text: input.text ?? "" });
+    },
+  });
+
+  await processImportTrigger(
+    client,
+    { timeClocks: [NORTH, SOUTH] },
+    baseChatConfig,
+    { ...basePayload, caption: "please add to South Cafe" },
+  );
+
+  assert.equal(writesAttempted.length, 0);
+  assert.equal(posted.length, 1);
+  assert.match(posted[0]!.text, /Jobs point to North Cafe/);
+  assert.match(posted[0]!.text, /caption said South Cafe/);
+});
+
+test("processImportTrigger: multi-Time-Clock, unresolved -> aborts before any write, lists valid Time Clock names", async () => {
+  const posted: Array<{ text: string }> = [];
+  const buffer = await buildScheduleExportBufferWithResource("Chef");
+  const client = fakeClient({
+    async downloadAttachment() {
+      return buffer;
+    },
+    async listJobsAcrossTimeClocksByTitles() {
+      return [];
+    },
+    async createShiftTimeActivity() {
+      throw new Error("should not be called — Time Clock never resolved");
+    },
+    async postChatMessage(input) {
+      posted.push({ text: input.text ?? "" });
+    },
+  });
+
+  await processImportTrigger(client, { timeClocks: [NORTH, SOUTH] }, baseChatConfig, basePayload);
+
+  assert.equal(posted.length, 1);
+  assert.match(posted[0]!.text, /Couldn't tell which Time Clock/);
+  assert.match(posted[0]!.text, /North Cafe/);
+  assert.match(posted[0]!.text, /South Cafe/);
 });

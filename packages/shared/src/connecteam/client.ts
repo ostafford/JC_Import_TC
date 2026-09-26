@@ -163,21 +163,46 @@ export class ConnecteamClient {
    */
   async listJobsByTitles(titles: string[], instanceId: TimeClockId): Promise<Job[]> {
     if (titles.length === 0) return [];
+    return this.listJobsByTitlesQuery(titles, [String(instanceId)]);
+  }
 
+  /**
+   * Same query, minus the `instanceIds` filter — added for multi-Time-Clock
+   * routing (issue 01 of the multi-time-clock-routing map). Confirmed live:
+   * querying by name alone still returns each Job's own real `instanceIds`,
+   * which is enough to tell which Time Clock a Job belongs to without
+   * knowing it up front. Only meaningful when more than one Time Clock is
+   * configured — the common single-Time-Clock case keeps using the scoped
+   * `listJobsByTitles` above, unchanged.
+   */
+  async listJobsAcrossTimeClocksByTitles(titles: string[]): Promise<Job[]> {
+    if (titles.length === 0) return [];
+    return this.listJobsByTitlesQuery(titles);
+  }
+
+  private async listJobsByTitlesQuery(titles: string[], instanceIds?: string[]): Promise<Job[]> {
     const results: Job[] = [];
     let offset = 0;
     for (;;) {
-      const page = await this.request<{ jobs: Array<{ jobId: string; title: string }> }>("GET", "/jobs/v1/jobs", {
+      const page = await this.request<{
+        jobs: Array<{ jobId: string; title: string; instanceIds: number[] }>;
+      }>("GET", "/jobs/v1/jobs", {
         query: {
           jobNames: titles,
-          instanceIds: [String(instanceId)],
+          instanceIds,
           includeDeleted: "false",
           limit: JOBS_PAGE_LIMIT,
           offset,
         },
       });
       const jobs = page.jobs ?? [];
-      results.push(...jobs.map((j) => ({ jobId: asJobId(j.jobId), title: j.title })));
+      results.push(
+        ...jobs.map((j) => ({
+          jobId: asJobId(j.jobId),
+          title: j.title,
+          instanceIds: (j.instanceIds ?? []).map((id) => asTimeClockId(String(id))),
+        })),
+      );
       if (jobs.length < JOBS_PAGE_LIMIT) break;
       offset += JOBS_PAGE_LIMIT;
     }

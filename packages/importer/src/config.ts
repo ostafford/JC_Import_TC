@@ -10,32 +10,47 @@ import {
   type TimeClockId,
 } from "@sch-import/shared";
 
+/** One configured Time Clock this Importer may route an Import Run to (multi-time-clock-routing map). */
+export interface TimeClockSetupEntry {
+  timeClockId: string;
+  name: string;
+  manualBreaksEnabled: boolean;
+  unpaidBreakTypeId?: string;
+  paidBreakTypeId?: string;
+}
+
+export interface ResolvedTimeClock {
+  timeClockId: TimeClockId;
+  name: string;
+  manualBreaksEnabled: boolean;
+  unpaidBreakTypeId?: BreakTypeId;
+  paidBreakTypeId?: BreakTypeId;
+}
+
 export interface ImporterConfig {
   apiToken: string;
   baseUrl?: string;
   webhookSharedSecret: string;
   port: number;
   conversationId: ConversationId;
-  timeClockId: TimeClockId;
   /** A Custom Publisher ID (Settings -> Feed settings in Connecteam), not a real Employee's user ID. */
   senderId: PublisherId;
-  manualBreaksEnabled: boolean;
-  unpaidBreakTypeId?: BreakTypeId;
-  paidBreakTypeId?: BreakTypeId;
+  timeClocks: ResolvedTimeClock[];
 }
 
 /**
- * Written once by `importer setup` (issue 06/08). Deliberately excludes
+ * Written once by `importer setup` (issue 06/08, extended for multiple Time
+ * Clocks by the multi-time-clock-routing map). Deliberately excludes
  * secrets (API token, webhook shared secret) — those stay in .env, never in
  * this file, so it's safe to commit alongside the Importer if desired.
+ *
+ * Breaking change from the original single-Time-Clock schema — no migration
+ * (this project has no client deployments yet); re-run `importer setup`.
  */
 export interface PersistedSetupConfig {
   conversationId: string;
-  timeClockId: string;
   senderId: string;
-  manualBreaksEnabled: boolean;
-  unpaidBreakTypeId?: string;
-  paidBreakTypeId?: string;
+  timeClocks: TimeClockSetupEntry[];
 }
 
 const DEFAULT_CONFIG_PATH = "./importer.config.json";
@@ -63,16 +78,30 @@ export function loadImporterConfig(): ImporterConfig {
     webhookSharedSecret: requireEnv("WEBHOOK_SHARED_SECRET"),
     port: Number(process.env.PORT ?? 8787),
     conversationId: asConversationId(persisted.conversationId),
-    timeClockId: asTimeClockId(persisted.timeClockId),
     senderId: asPublisherId(persisted.senderId),
-    manualBreaksEnabled: persisted.manualBreaksEnabled,
-    unpaidBreakTypeId: persisted.unpaidBreakTypeId ? asBreakTypeId(persisted.unpaidBreakTypeId) : undefined,
-    paidBreakTypeId: persisted.paidBreakTypeId ? asBreakTypeId(persisted.paidBreakTypeId) : undefined,
+    timeClocks: persisted.timeClocks.map((tc) => ({
+      timeClockId: asTimeClockId(tc.timeClockId),
+      name: tc.name,
+      manualBreaksEnabled: tc.manualBreaksEnabled,
+      unpaidBreakTypeId: tc.unpaidBreakTypeId ? asBreakTypeId(tc.unpaidBreakTypeId) : undefined,
+      paidBreakTypeId: tc.paidBreakTypeId ? asBreakTypeId(tc.paidBreakTypeId) : undefined,
+    })),
   };
 }
 
 export function persistSetupConfig(config: PersistedSetupConfig, configPath = DEFAULT_CONFIG_PATH): void {
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
+}
+
+/**
+ * Used by `importer setup` to detect an existing config and offer to add a
+ * Time Clock rather than always starting over. Deliberately doesn't touch
+ * env vars (unlike `loadImporterConfig`) — setup itself is what establishes
+ * `.env`, so requiring it here would be circular.
+ */
+export function loadPersistedConfigIfPresent(configPath = DEFAULT_CONFIG_PATH): PersistedSetupConfig | undefined {
+  if (!existsSync(configPath)) return undefined;
+  return JSON.parse(readFileSync(configPath, "utf8")) as PersistedSetupConfig;
 }
 
 /**

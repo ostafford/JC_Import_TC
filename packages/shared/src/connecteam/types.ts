@@ -114,10 +114,17 @@ export interface TimestampWithTimezone {
   timezone: string;
 }
 
-/** Confirmed via GET /jobs/v1/jobs (discovered live, 2026-09-22 — see JobId's doc comment). */
+/**
+ * Confirmed via GET /jobs/v1/jobs (discovered live, 2026-09-22 — see JobId's
+ * doc comment). `instanceIds` is the Job's real Time-Clock association(s),
+ * confirmed live during multi-Time-Clock-routing wayfinding (issue 01 of
+ * that map) — always array-shaped, never a bare scalar, no documented
+ * "all Time Clocks" sentinel.
+ */
 export interface Job {
   jobId: JobId;
   title: string;
+  instanceIds: TimeClockId[];
 }
 
 export interface CreateShiftTimeActivityInput {

@@ -21,13 +21,27 @@ export interface Env {
   WEBHOOK_SHARED_SECRET: string;
   CONNECTEAM_BASE_URL?: string;
   CONVERSATION_ID: string;
-  TIME_CLOCK_ID: string;
+  /**
+   * A JSON-encoded array of `TimeClockVarEntry` (multi-time-clock-routing
+   * map, Phase 3) — one Worker var, not one var per field per Time Clock,
+   * since `wrangler.jsonc`'s `vars` are flat strings and a list of objects
+   * has no natural flat representation. Still just one paste for whoever's
+   * filling in the "Deploy to Cloudflare" button's vars, same as any other
+   * single var. A single-Time-Clock deployment is just a one-element array
+   * — no separate code path needed.
+   */
+  TIME_CLOCKS_JSON: string;
   /** A Custom Publisher ID (Settings -> Feed settings in Connecteam), not a real Employee's user ID. */
   SENDER_ID: string;
-  MANUAL_BREAKS_ENABLED: string;
-  UNPAID_BREAK_TYPE_ID?: string;
-  PAID_BREAK_TYPE_ID?: string;
   IMPORT_QUEUE: Queue<RelayTriggerPayload>;
+}
+
+interface TimeClockVarEntry {
+  timeClockId: string;
+  name: string;
+  manualBreaksEnabled: boolean;
+  unpaidBreakTypeId?: string;
+  paidBreakTypeId?: string;
 }
 
 /**
@@ -98,12 +112,7 @@ export default {
 
       await processImportTrigger(
         client,
-        {
-          timeClockId: config.timeClockId,
-          manualBreaksEnabled: config.manualBreaksEnabled,
-          unpaidBreakTypeId: config.unpaidBreakTypeId,
-          paidBreakTypeId: config.paidBreakTypeId,
-        },
+        { timeClocks: config.timeClocks },
         { conversationId: config.conversationId, senderId: config.senderId },
         message.body,
       );
@@ -125,20 +134,27 @@ function statusForFailure(reason: RelayTriggerVerificationFailure): number {
 
 interface ResolvedConfig {
   conversationId: ConversationId;
-  timeClockId: TimeClockId;
   senderId: PublisherId;
-  manualBreaksEnabled: boolean;
-  unpaidBreakTypeId?: BreakTypeId;
-  paidBreakTypeId?: BreakTypeId;
+  timeClocks: Array<{
+    timeClockId: TimeClockId;
+    name: string;
+    manualBreaksEnabled: boolean;
+    unpaidBreakTypeId?: BreakTypeId;
+    paidBreakTypeId?: BreakTypeId;
+  }>;
 }
 
 function configFromEnv(env: Env): ResolvedConfig {
+  const entries = JSON.parse(env.TIME_CLOCKS_JSON) as TimeClockVarEntry[];
   return {
     conversationId: asConversationId(env.CONVERSATION_ID),
-    timeClockId: asTimeClockId(env.TIME_CLOCK_ID),
     senderId: asPublisherId(env.SENDER_ID),
-    manualBreaksEnabled: env.MANUAL_BREAKS_ENABLED === "true",
-    unpaidBreakTypeId: env.UNPAID_BREAK_TYPE_ID ? asBreakTypeId(env.UNPAID_BREAK_TYPE_ID) : undefined,
-    paidBreakTypeId: env.PAID_BREAK_TYPE_ID ? asBreakTypeId(env.PAID_BREAK_TYPE_ID) : undefined,
+    timeClocks: entries.map((tc) => ({
+      timeClockId: asTimeClockId(tc.timeClockId),
+      name: tc.name,
+      manualBreaksEnabled: tc.manualBreaksEnabled,
+      unpaidBreakTypeId: tc.unpaidBreakTypeId ? asBreakTypeId(tc.unpaidBreakTypeId) : undefined,
+      paidBreakTypeId: tc.paidBreakTypeId ? asBreakTypeId(tc.paidBreakTypeId) : undefined,
+    })),
   };
 }

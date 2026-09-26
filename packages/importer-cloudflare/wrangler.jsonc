@@ -45,11 +45,13 @@
   // Vars (plain config, set below or via `wrangler deploy --var`):
   "vars": {
     "CONVERSATION_ID": "6eb46edd-47b5-4cf2-bcbb-b18fdf5ac694",
-    "TIME_CLOCK_ID": "19481537",
     "SENDER_ID": "2480518",
-    "MANUAL_BREAKS_ENABLED": "true",
-    "UNPAID_BREAK_TYPE_ID": "a9618ea2-4b1e-4408-ae1a-821418aa909b",
-    "PAID_BREAK_TYPE_ID": "0531a675-0753-4a24-f461-41e1bc5693ae"
+    // A JSON-encoded array (multi-time-clock-routing map, Phase 3) — one
+    // element per Time Clock this Importer routes across, same shape as
+    // importer.config.json's own `timeClocks` array. Regenerate this string
+    // from that file (`JSON.stringify(require("./importer.config.json").timeClocks)`)
+    // whenever the local `importer setup` output changes.
+    "TIME_CLOCKS_JSON": "[{\"timeClockId\":\"16462477\",\"name\":\"MYOB\",\"manualBreaksEnabled\":true,\"unpaidBreakTypeId\":\"6661f024-746a-4618-8f0a-1e51d1755aa5\",\"paidBreakTypeId\":\"d5224edb-6578-ad28-be42-7c4e1b9f8340\"},{\"timeClockId\":\"19481524\",\"name\":\"Xero v1\",\"manualBreaksEnabled\":true,\"unpaidBreakTypeId\":\"8314a5e9-6bd1-4fa9-8a4c-30e93ea2bffc\"},{\"timeClockId\":\"19481537\",\"name\":\"Xero v2\",\"manualBreaksEnabled\":true,\"unpaidBreakTypeId\":\"a9618ea2-4b1e-4408-ae1a-821418aa909b\",\"paidBreakTypeId\":\"0531a675-0753-4a24-f461-41e1bc5693ae\"}]"
     // Optional: CONNECTEAM_BASE_URL
   }
 }

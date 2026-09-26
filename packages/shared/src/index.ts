@@ -5,5 +5,6 @@ export * from "./dateTime.js";
 export * from "./employeeMatching.js";
 export * from "./scheduleExport.js";
 export * from "./importRun.js";
+export * from "./timeClockResolution.js";
 export * from "./chatConfirmation.js";
 export * from "./importTrigger.js";

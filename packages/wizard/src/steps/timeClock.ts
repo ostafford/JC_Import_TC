@@ -60,6 +60,7 @@ export async function handleTimeClockStep(req: IncomingMessage, res: ServerRespo
   }
 
   state.timeClockId = chosen.timeClockId;
+  state.timeClockName = chosen.name;
   state.senderId = senderId;
   state.breaksConfig = breaksConfig;
 

@@ -9,6 +9,12 @@ export interface RelayTriggerPayload {
   messageId: string;
   /** The attachment's direct download URL, as Connecteam's chat webhook delivers it — no separate fileId on the wire (issue 06). */
   attachmentUrl: string;
+  /**
+   * The message's own text, if any (Connecteam's `data.message.content`) —
+   * only ever used by the Importer as the multi-Time-Clock fallback signal
+   * (multi-time-clock-routing map, issue 05).
+   */
+  caption?: string;
 }
 
 /**
@@ -127,7 +133,10 @@ function parseMessageCreatedEvent(event: unknown): RelayTriggerPayload | undefin
   const attachmentUrl = firstAttachment?.url;
   if (typeof attachmentUrl !== "string") return undefined;
 
-  return { conversationId, messageId, attachmentUrl };
+  const content = message.content;
+  const caption = typeof content === "string" && content.trim().length > 0 ? content : undefined;
+
+  return { conversationId, messageId, attachmentUrl, caption };
 }
 
 /** A compact, non-sensitive shape summary for the "why was this ignored?" log line — never the raw event body. */

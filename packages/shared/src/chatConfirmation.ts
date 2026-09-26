@@ -21,14 +21,16 @@ export async function sendImportResultToChat(
   client: ChatSender,
   config: ChatConfirmationConfig,
   outcome: ImportRunOutcome,
+  timeClockName?: string,
 ): Promise<void> {
   const totalSkipped = outcome.totalRows - outcome.succeeded;
+  const targetSuffix = timeClockName ? ` into ${timeClockName}` : "";
 
   if (totalSkipped === 0) {
     await client.postChatMessage({
       conversationId: config.conversationId,
       senderId: config.senderId,
-      text: `✅ Imported ${outcome.succeeded} shift${outcome.succeeded === 1 ? "" : "s"} from your schedule export.`,
+      text: `✅ Imported ${outcome.succeeded} shift${outcome.succeeded === 1 ? "" : "s"}${targetSuffix} from your schedule export.`,
     });
     return;
   }
@@ -43,8 +45,55 @@ export async function sendImportResultToChat(
   await client.postChatMessage({
     conversationId: config.conversationId,
     senderId: config.senderId,
-    text: truncate(summaryText(outcome), TEXT_CHAR_BUDGET),
+    text: truncate(summaryText(outcome, targetSuffix), TEXT_CHAR_BUDGET),
     attachments: [{ type: "file", fileId }],
+  });
+}
+
+/**
+ * For when neither the primary (Job) nor fallback (caption) Time Clock
+ * Signal resolves to exactly one Time Clock (multi-time-clock-routing map,
+ * issue 03) — posted instead of running anything, since there's no
+ * `timeClockId` to scope any write with. Lists the valid names so the
+ * Admin's next attempt is self-service.
+ */
+export async function sendTimeClockUnresolvedToChat(
+  client: ChatSender,
+  config: ChatConfirmationConfig,
+  timeClockNames: string[],
+): Promise<void> {
+  await client.postChatMessage({
+    conversationId: config.conversationId,
+    senderId: config.senderId,
+    text: truncate(
+      `⚠️ Couldn't tell which Time Clock this schedule belongs to. Re-upload with a caption naming one of: ${timeClockNames.join(", ")}.`,
+      TEXT_CHAR_BUDGET,
+    ),
+  });
+}
+
+/**
+ * For when the Job-based signal and the caption each resolve, but to
+ * *different* Time Clocks (discovered live, 2026-09-26 — see
+ * `resolveTimeClockForRun`'s doc comment) — an explicit caption is a real
+ * instruction, so a disagreement is a genuine conflict to surface, never
+ * something to silently pick a winner for.
+ */
+export async function sendTimeClockConflictToChat(
+  client: ChatSender,
+  config: ChatConfirmationConfig,
+  jobResolvedName: string,
+  captionResolvedName: string,
+): Promise<void> {
+  await client.postChatMessage({
+    conversationId: config.conversationId,
+    senderId: config.senderId,
+    text: truncate(
+      `⚠️ This schedule's Jobs point to ${jobResolvedName}, but your caption said ${captionResolvedName} — nothing was imported. ` +
+        `If ${jobResolvedName} is right, re-upload with no caption (or one naming ${jobResolvedName}). ` +
+        `If ${captionResolvedName} is right, this schedule's Jobs need to be reassigned to it in Connecteam first.`,
+      TEXT_CHAR_BUDGET,
+    ),
   });
 }
 
@@ -86,7 +135,7 @@ export async function sendImportCrashedToChat(
   });
 }
 
-function summaryText(outcome: ImportRunOutcome): string {
+function summaryText(outcome: ImportRunOutcome, targetSuffix: string): string {
   const skippedParts = Object.entries(outcome.skippedByReason)
     .filter(([, count]) => count > 0)
     .map(([reason, count]) => `${count} ${humanizeReason(reason)}`);
@@ -96,7 +145,7 @@ function summaryText(outcome: ImportRunOutcome): string {
     .map((r) => r.employeeName);
   const lockedDayNote = lockedDayNames.length > 0 ? ` Locked day(s) for: ${Array.from(new Set(lockedDayNames)).join(", ")}.` : "";
 
-  return `Imported ${outcome.succeeded}/${outcome.totalRows} shifts. Skipped: ${skippedParts.join(", ")}.${lockedDayNote} Full detail attached.`;
+  return `Imported ${outcome.succeeded}/${outcome.totalRows} shifts${targetSuffix}. Skipped: ${skippedParts.join(", ")}.${lockedDayNote} Full detail attached.`;
 }
 
 function humanizeReason(reason: string): string {

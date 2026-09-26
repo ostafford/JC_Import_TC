@@ -62,12 +62,7 @@ async function handleRequest(
   // catch.
   void processImportTrigger(
     client,
-    {
-      timeClockId: config.timeClockId,
-      manualBreaksEnabled: config.manualBreaksEnabled,
-      unpaidBreakTypeId: config.unpaidBreakTypeId,
-      paidBreakTypeId: config.paidBreakTypeId,
-    },
+    { timeClocks: config.timeClocks },
     { conversationId: config.conversationId, senderId: config.senderId },
     verification.payload,
   );

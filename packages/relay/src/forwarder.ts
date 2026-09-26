@@ -12,6 +12,13 @@ export interface RelayTriggerPayload {
    * is no separate fileId on the wire, unlike issue 06's original guess.
    */
   attachmentUrl: string;
+  /**
+   * The message's own text, if any (Connecteam's `data.message.content`) —
+   * only ever used by the Importer as the multi-Time-Clock fallback signal
+   * (multi-time-clock-routing map, issue 05). Still just a pointer/identifier
+   * in ADR 0001's sense, not the Schedule Export's content.
+   */
+  caption?: string;
 }
 
 /**
