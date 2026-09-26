@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "node typecheck.mjs",
     "dev": "wrangler dev src/index.ts",
     "bundle": "wrangler deploy src/index.ts --dry-run --outdir=release && rm -f release/README.md",
     "deploy": "npm run bundle && wrangler deploy"
