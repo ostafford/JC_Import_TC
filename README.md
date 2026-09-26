@@ -70,8 +70,8 @@ Open `http://localhost:8789` and work through its six steps:
 1. **Connecteam API token** — from Connecteam: Settings → Integrations → API.
 2. **Pick a conversation** to link, and enter the Relay's public webhook URL (the Relay's tunnel URL from step 4, with `/webhooks/connecteam` appended). Use a chat containing only the Admins who should be able to trigger an Import Run.
 3. **Create the webhook yourself in Connecteam** — the wizard shows you the exact values to enter (name, endpoint URL, secret key, feature, event type), then verifies it exists once you confirm.
-4. **Time Clock ID and Custom Publisher ID** — the Time Clock Time Activities are written to, and the Custom Publisher chat confirmations post as (Connecteam admin → Settings → Feed settings → Custom Publishers, if you haven't made one yet).
-5. **Default Break Types** — only shown if manual breaks are enabled on that Time Clock; picks the default label for unpaid and paid breaks (actual durations always come from the Schedule Export).
+4. **Time Clocks and Custom Publisher ID** — pick every Time Clock this Importer should be able to write to (one is fine; pick more if this Admin manages several locations — see [Multiple Time Clocks](#multiple-time-clocks) below), and the Custom Publisher chat confirmations post as (Connecteam admin → Settings → Feed settings → Custom Publishers, if you haven't made one yet).
+5. **Default Break Types, one pass per Time Clock** — for each Time Clock picked in step 4 with manual breaks enabled, picks the default label for unpaid and paid breaks (actual durations always come from the Schedule Export); a Time Clock with breaks disabled is skipped automatically.
 6. **Importer's public endpoint URL and your email** — the Importer's tunnel URL from step 4, and the email you'll use to log into the Relay's dashboard later (magic-link, no password).
 
 Finishing step 6 writes `packages/importer/importer.config.json` and `packages/importer/.env`, and saves the Chat Link on the running Relay.
@@ -92,6 +92,19 @@ Once set up, an Admin uploads a Schedule Export to the linked chat conversation.
 
 To manage the Chat Link later (e.g. re-point it at a different Importer endpoint), log into the Relay at its public URL with the Admin email from step 6 — it emails a magic link, or logs it to the console if no SMTP is configured (see `packages/relay/.env.example`).
 
+## Multiple Time Clocks
+
+One Importer can hold several Time Clocks — for one company with several locations (a café chain, say), each its own Time Clock feeding its own payroll/Xero connection, all still sharing one Chat Link and one set of Admins.
+
+Each Import Run resolves to exactly one Time Clock, checked in this order:
+
+1. **Primary — the Schedule Export's own Jobs.** The `Resource` column is matched to a real Connecteam Job, the same job-tracking match this project already makes, and that Job's own Time Clock association is used automatically — no extra step from the Admin at all. This only resolves cleanly if every Job referenced in one Schedule Export belongs to the *same* Time Clock, so for this to work reliably, set each location's Jobs up as exclusive to that location's Time Clock in Connecteam.
+2. **Fallback — a caption on the upload.** If the Jobs don't resolve to exactly one Time Clock (shared Jobs, or a genuinely mixed file), add a caption to the file when uploading it in Connecteam Chat, naming the Time Clock — e.g. "add to Xero v2". Matching looks for the Time Clock's name anywhere in the caption, case-insensitive, so a full sentence is fine.
+
+If neither resolves it, or the two disagree (the Jobs point to one Time Clock, the caption names a different one), nothing is imported — Chat explains why and, for an unresolved case, lists the valid Time Clock names, so a real disagreement is never silently guessed through.
+
+With only one Time Clock configured, none of this applies — every Import Run just uses it, exactly as if this feature didn't exist.
+
 ## CLI setup (fallback)
 
 `packages/importer` also has a terminal-based setup you can run directly against the Importer, without the Relay or wizard involved:
@@ -100,7 +113,7 @@ To manage the Chat Link later (e.g. re-point it at a different Importer endpoint
 npm run importer -- setup
 ```
 
-This prompts for the same information as the wizard, has Connecteam create the webhook automatically instead of walking through it in Connecteam's UI, and prints the values you'd need to paste into the Relay's dashboard by hand.
+This prompts for the same information as the wizard — including a multi-select for Time Clocks and a Break Type picker for each one — has Connecteam create the webhook automatically instead of walking through it in Connecteam's UI, and prints the values you'd need to paste into the Relay's dashboard by hand. If `importer.config.json` already exists, it offers to add one more Time Clock instead of redoing everything.
 
 ## Deploying to Cloudflare (optional)
 
@@ -118,7 +131,7 @@ Either way, this prints the Worker's public URL (`https://sch-import-relay.<your
 
 ### Importer
 
-Either way, run `npm run importer -- setup` first (if you haven't already) against your real Connecteam account — you'll need the values it prints (`conversationId`, `timeClockId`, `senderId`, `manualBreaksEnabled`, break type IDs, and a generated shared secret) for either path below.
+Either way, run `npm run importer -- setup` first (if you haven't already) against your real Connecteam account — you'll need the values it writes to `packages/importer/importer.config.json` (`conversationId`, `senderId`, and the list of configured Time Clocks with their break settings) plus the generated shared secret it prints, for either path below.
 
 **Using the button** (no terminal needed for anything after clicking it):
 
@@ -126,7 +139,7 @@ Either way, run `npm run importer -- setup` first (if you haven't already) again
 
 This also creates the queue the Importer depends on automatically — Cloudflare's button provisions Queues (and Durable Objects, KV, D1, R2, etc.) declared in the repo's Wrangler config, the same as a manual `wrangler queues create` would. Once it's deployed, set the config entirely through the dashboard, no CLI: open this Worker at **Workers & Pages → (your Worker) → Settings → Variables and Secrets → Add**, and add:
 - **Secrets**: `CONNECTEAM_API_TOKEN`, `WEBHOOK_SHARED_SECRET` (from `importer setup`'s output)
-- **Plain vars**: `CONVERSATION_ID`, `TIME_CLOCK_ID`, `SENDER_ID`, `MANUAL_BREAKS_ENABLED`, and `UNPAID_BREAK_TYPE_ID`/`PAID_BREAK_TYPE_ID` if manual breaks are enabled
+- **Plain vars**: `CONVERSATION_ID`, `SENDER_ID`, and `TIME_CLOCKS_JSON` — one JSON-encoded array, one object per configured Time Clock (`timeClockId`, `name`, `manualBreaksEnabled`, `unpaidBreakTypeId`/`paidBreakTypeId` where enabled). `importer setup` doesn't print this exact string — build it from `importer.config.json`, e.g. `node -e "console.log(JSON.stringify(require('./importer.config.json').timeClocks))"` run from `packages/importer`
 
 Then click **Deploy** in the dashboard to apply them.
 
@@ -139,7 +152,7 @@ npx wrangler secret put CONNECTEAM_API_TOKEN
 npx wrangler secret put WEBHOOK_SHARED_SECRET
 ```
 
-Then set the plain vars (`CONVERSATION_ID`, `TIME_CLOCK_ID`, `SENDER_ID`, `MANUAL_BREAKS_ENABLED`, break type IDs) in `packages/importer-cloudflare/wrangler.jsonc` and run `npm run deploy --workspace packages/importer-cloudflare` (bundles fresh, then deploys — see the note below).
+Then set the plain vars (`CONVERSATION_ID`, `SENDER_ID`, `TIME_CLOCKS_JSON`) in `packages/importer-cloudflare/wrangler.jsonc` and run `npm run deploy --workspace packages/importer-cloudflare` (bundles fresh, then deploys — see the note below).
 
 **Either way**, paste this Worker's URL (shown after deploy — no path suffix, it's a single endpoint) into the Relay's Chat Link form as the Importer's webhook endpoint.
 
@@ -165,3 +178,4 @@ CONTEXT.md   project vocabulary
 
 - [`CONTEXT.md`](CONTEXT.md) — vocabulary used throughout the code and docs
 - [`docs/adr/0001-relay-never-touches-customer-data.md`](docs/adr/0001-relay-never-touches-customer-data.md) — why the Relay/Importer split exists
+- [`docs/adr/0003-shared-deployment-resolves-time-clock-at-upload-time.md`](docs/adr/0003-shared-deployment-resolves-time-clock-at-upload-time.md) — why [multiple Time Clocks](#multiple-time-clocks) resolve from the upload itself, not a live chat back-and-forth
