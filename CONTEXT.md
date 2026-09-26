@@ -36,12 +36,16 @@ _Avoid_: Import (was the earlier glossary term; renamed to match the codebase's 
 Connecteam's own API term for a single timesheet/time-clock entry (a shift, or a break within a shift). Borrowed directly from Connecteam's API — not renamed, since tickets will reference Connecteam's API docs directly.
 
 **Time Clock**:
-Connecteam's own container that Time Activities (and, where job tracking is enabled, Jobs) are scoped to. An Admin picks one Time Clock to write to during setup; every Import Run for that Admin writes into it. Borrowed directly from Connecteam's own naming.
+Connecteam's own container that Time Activities (and, where job tracking is enabled, Jobs) are scoped to. An Admin configures one or more Time Clocks during setup; when only one is configured, every Import Run writes into it. When more than one is configured, each Import Run resolves to exactly one via its Time Clock Signal. Borrowed directly from Connecteam's own naming.
 _Avoid_: Clock, timesheet (timesheet is the general concept; Time Clock is the specific Connecteam entity holding it)
 
 **Job**:
-A Connecteam job-tracking record, scoped to one Time Clock, that some Time Clocks (not all) require every Time Activity to reference. Matched from the Schedule Export's `Resource` column (e.g. "Chef", "Barista") by title, case-sensitively. Borrowed directly from Connecteam's own naming.
+A Connecteam job-tracking record, associated with one or more Time Clocks, that some Time Clocks (not all) require every Time Activity to reference. Matched from the Schedule Export's `Resource` column (e.g. "Chef", "Barista") by title, case-sensitively. Borrowed directly from Connecteam's own naming.
 _Avoid_: Resource (Resource is only the Schedule Export's column name for the value that gets matched to a Job — not the domain concept itself), role
+
+**Time Clock Signal**:
+What a single upload's Time Clock resolves from, when more than one Time Clock is configured — always resolved live against Connecteam's own data, never a stored mapping. Primary: the Schedule Export's `Resource` column, resolved through existing Job matching, reading the matched Job's own Time Clock association. Fallback, used only when that's ambiguous: the upload's caption text, matched against a Time Clock's real name. Unresolved input, not itself a Time Clock — resolved by matching, the same way a Schedule Export's plain name string is resolved to an Employee rather than being one.
+_Avoid_: Location, Site, Branch (Connecteam has no such entity of its own — avoid implying one exists), Tag, Time Clock Mapping (an earlier design considered a stored signal→Time-Clock config; dropped once both real signals turned out to resolve live against Connecteam's own data instead)
 
 **Break Type**:
 A pre-configured, account-specific identifier (set up in the Admin's own Connecteam account settings) that every break Time Activity must reference. Not a free-text or paid/unpaid field on the break itself.
